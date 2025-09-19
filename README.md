@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/yourusername/hopln/blob/main/assets/hopln-screenshot.png?raw=true" alt="Hopln App Screenshot" width="300" />
+  <img src="https://github.com/arden28/hopln/blob/main/assets/hopln-screenshot.png?raw=true" alt="Hopln App Screenshot" width="300" />
 </p>
 
 ---
@@ -305,11 +305,11 @@ DeviceEventEmitter.emit('stopSelected', selectedStop);
 
 | Phase | Features | Status |
 |-------|----------|--------|
-| **Q4 2024** | Vehicle tracking overlays (GTFS-RT) | 🔄 Planning |
-| **Q1 2025** | Offline tiles & cached stops | 🔄 Planning |
-| **Q2 2025** | Multi-modal trip planning | 📋 Backlog |
-| **Q3 2025** | On-device rerouting | 📋 Backlog |
-| **Q4 2025** | Localization & RTL support | 📋 Backlog |
+| **Q4 2025** | Vehicle tracking overlays (GTFS-RT) | 🔄 Planning |
+| **Q1 2026** | Offline tiles & cached stops | 🔄 Planning |
+| **Q2 2026** | Multi-modal trip planning | 📋 Backlog |
+| **Q3 2026** | On-device rerouting | 📋 Backlog |
+| **Q4 2026** | Localization & RTL support | 📋 Backlog |
 
 ---
 
@@ -365,13 +365,13 @@ Built with ❤️ using:
 - **Mapbox GL** for smooth, high-performance mapping
 - **TypeScript** for type safety and developer experience
 
-**Data Note**: Nairobi stage names and coordinates are sample data. Always verify coordinates and stage information before production use.
+**Data Note**: Nairobi stage names and coordinates are provided by `digitalmatatu.com`. Always verify coordinates and stage information before production use.
 
 ---
 
 <div align="center">
 
-[![Star on GitHub](https://img.shields.io/github/stars/yourusername/hopln?style=social)](https://github.com/yourusername/hopln)
+[![Star on GitHub](https://img.shields.io/github/stars/arden28/hopln?style=social)](https://github.com/arden28/hopln)
 [![Made with Expo](https://img.shields.io/badge/Made%20with-EXPO-blue?logo=expo)](https://expo.dev)
 
 </div>
