@@ -30,6 +30,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "@rnmapbox/maps",
       "expo-router",
       [
         "expo-splash-screen",
@@ -41,13 +42,14 @@
           "dark": {
             "backgroundColor": "#000000"
           }
-        },
+        }
+      ],
+      [
         "@rnmapbox/maps",
         {
           "RNMapboxMapsImpl": "mapbox",
           "RNMapboxMapsDownloadToken": "YOUR_MAPBOX_DOWNLOADS_TOKEN"
         }
-
       ]
     ],
     "experiments": {
