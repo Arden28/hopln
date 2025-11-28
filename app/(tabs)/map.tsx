@@ -153,7 +153,7 @@ export default function MapScreen() {
     cameraRef.current?.setCamera({
       centerCoordinate: [meSmoothRef.current.longitude, meSmoothRef.current.latitude],
       zoomLevel: 15.5,
-      // bearing: 0,
+      bearing: 0,
       pitch: 0,
       animationDuration: 450,
     });
@@ -163,7 +163,7 @@ export default function MapScreen() {
     cameraRef.current?.setCamera({
       centerCoordinate: [stop.lng, stop.lat],
       zoomLevel: 17.2,
-      // bearing: 0,
+      bearing: 0,
       pitch: 0,
       animationDuration: 500,
       // @ts-ignore
@@ -185,6 +185,7 @@ export default function MapScreen() {
       : typeof props.zoomLevel === "number"
       ? props.zoomLevel
       : undefined;
+      
     if (typeof z === "number") setMapZoom(z);
 
     // Center (prefer props.center, fallback to event geometry)
@@ -395,7 +396,7 @@ export default function MapScreen() {
       cameraRef.current?.setCamera({
         centerCoordinate: [nextSmoothed.longitude, nextSmoothed.latitude],
         zoomLevel: safeZoom,
-        // bearing: heading,
+        bearing: heading,
         pitch: 45,
         animationDuration: 300,
       });
@@ -853,7 +854,7 @@ export default function MapScreen() {
                           cameraRef.current?.setCamera({
                             centerCoordinate: [meSmoothRef.current.longitude, meSmoothRef.current.latitude],
                             zoomLevel: NAV_ZOOM_BASE,
-                            // bearing: meSmoothRef.current.heading ?? 0,
+                            bearing: meSmoothRef.current.heading ?? 0,
                             pitch: 45,
                             animationDuration: 250,
                           });
