@@ -1,31 +1,64 @@
-import { AvatarButton, LogoTitle } from "@/components/app/Header";
-import { HapticTab } from '@/components/haptic-tab';
-import TabBarBackground from '@/components/ui/TabBarBackground';
-import { Colors } from '@/constants/theme';
+import { AvatarButton, MinimalistTitle } from "@/components/app/Header";
+import { HapticTab } from "@/components/haptic-tab";
+import TabBarBackground from "@/components/ui/TabBarBackground";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import React from 'react';
+import React from "react";
 import { Platform, useColorScheme } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const ORANGE = "#FF6F00";
+
 export default function TabsLayout() {
   const colorScheme = useColorScheme();
 
+  // Gets device-specific safe boundaries (notches, dynamic islands, etc.)
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
+      // --- GLOBAL SCREEN PADDING ---
+      // This applies a global padding to all screens so they don't hide under the transparent header
+      sceneContainerStyle={{
+        paddingTop: insets.top + 60, // Safe area top + header height
+        backgroundColor: "#F8F9FA", // Light neutral background for the whole app
+      }}
       screenOptions={{
-        headerShown: true,
-        headerTransparent: false,
-        headerShadowVisible: false,
-        headerTitle: () => <LogoTitle />,
+        // --- HEADER STYLING ---
+        headerTitle: "",
+        headerLeft: () => <MinimalistTitle />,
         headerRight: () => <AvatarButton />,
-        headerStyle: { backgroundColor: "#F6F7F8" }, // neutral, not white
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        headerTransparent: true,
+        headerShadowVisible: false,
+
+        // --- TAB BAR STYLING ---
+        tabBarShowLabel: true, // Restored the labels
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: "600",
+          marginBottom: Platform.OS === "ios" ? 0 : 4, // Minor visual tweak for Android
+        },
+        tabBarActiveTintColor: ORANGE,
+        tabBarInactiveTintColor: "#8E8E93",
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: Platform.select({
           ios: {
-            position: 'absolute',
+            position: "relative", // Made solid, no longer floating
+            backgroundColor: "#FFFFFF",
+            borderTopWidth: 1,
+            borderTopColor: "#F0F0F0", // Subtle border to separate from content
+            elevation: 0,
+            height: 85, // Standard solid height for iOS
           },
-          default: {},
+          android: {
+            backgroundColor: "#FFFFFF",
+            borderTopWidth: 1,
+            borderTopColor: "#F0F0F0",
+            elevation: 8,
+            height: 65,
+            paddingBottom: 8, // Gives the text breathing room
+          },
         }),
       }}
     >
@@ -33,8 +66,12 @@ export default function TabsLayout() {
         name="home"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
+          tabBarIcon: ({ color, focused, size }) => (
+            <Ionicons
+              name={focused ? "home" : "home-outline"}
+              size={size}
+              color={color}
+            />
           ),
         }}
       />
@@ -42,8 +79,13 @@ export default function TabsLayout() {
         name="map"
         options={{
           title: "Map",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="map-outline" size={size} color={color} />
+          headerShown: false,
+          tabBarIcon: ({ color, focused, size }) => (
+            <Ionicons
+              name={focused ? "map" : "map-outline"}
+              size={size}
+              color={color}
+            />
           ),
         }}
       />
@@ -51,8 +93,12 @@ export default function TabsLayout() {
         name="search"
         options={{
           title: "Search",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search-outline" size={size} color={color} />
+          tabBarIcon: ({ color, focused, size }) => (
+            <Ionicons
+              name={focused ? "search" : "search-outline"}
+              size={size + 2}
+              color={color}
+            />
           ),
         }}
       />

@@ -64,7 +64,8 @@ export default function Profile() {
           <ThemedText style={styles.backText}>Back</ThemedText>
         </Pressable>
         <ThemedText style={styles.topbarTitle}>Profile</ThemedText>
-        <View style={{ width: 44 }} />{/* spacer to balance back area */}
+        <View style={{ width: 44 }} />
+        {/* spacer to balance back area */}
       </View>
 
       {/* Header */}
@@ -78,7 +79,9 @@ export default function Profile() {
           <ThemedText type="title" style={{ fontSize: 22, color: BLACK }}>
             Brian Mwangi
           </ThemedText>
-          <ThemedText style={{ opacity: 0.7 }}>brianmwangi@email.com</ThemedText>
+          <ThemedText style={{ opacity: 0.7 }}>
+            brianmwangi@email.com
+          </ThemedText>
         </View>
       </View>
 
@@ -88,7 +91,11 @@ export default function Profile() {
           Travel preferences
         </ThemedText>
 
-        <Row icon="navigate-outline" label="Preferred map app" value="System default" />
+        <Row
+          icon="navigate-outline"
+          label="Preferred map app"
+          value="System default"
+        />
         <View style={styles.sep} />
         <Row icon="walk-outline" label="Stage hints" value="Concise" />
         <View style={styles.sep} />
@@ -103,9 +110,19 @@ export default function Profile() {
 
         <Row icon="home-outline" label="Home" value="Add" onPress={() => {}} />
         <View style={styles.sep} />
-        <Row icon="briefcase-outline" label="Work" value="Add" onPress={() => {}} />
+        <Row
+          icon="briefcase-outline"
+          label="Work"
+          value="Add"
+          onPress={() => {}}
+        />
         <View style={styles.sep} />
-        <Row icon="star-outline" label="Favorites" value={<Pill>0</Pill>} onPress={() => {}} />
+        <Row
+          icon="star-outline"
+          label="Favorites"
+          value={<Pill>0</Pill>}
+          onPress={() => {}}
+        />
       </ThemedView>
 
       {/* Community — contributions fit Safiri’s community-driven mapping */}
@@ -114,9 +131,19 @@ export default function Profile() {
           Community
         </ThemedText>
 
-        <Row icon="add-circle-outline" label="Your submissions" value={<Pill>0</Pill>} onPress={() => {}} />
+        <Row
+          icon="add-circle-outline"
+          label="Your submissions"
+          value={<Pill>0</Pill>}
+          onPress={() => {}}
+        />
         <View style={styles.sep} />
-        <Row icon="trophy-outline" label="Safiri Points" value={<Pill>0</Pill>} onPress={() => {}} />
+        <Row
+          icon="trophy-outline"
+          label="Safiri Points"
+          value={<Pill>0</Pill>}
+          onPress={() => {}}
+        />
       </ThemedView>
 
       {/* Account */}
@@ -127,9 +154,17 @@ export default function Profile() {
 
         <Row icon="person-outline" label="Profile details" onPress={() => {}} />
         <View style={styles.sep} />
-        <Row icon="notifications-outline" label="Notifications" onPress={() => {}} />
+        <Row
+          icon="notifications-outline"
+          label="Notifications"
+          onPress={() => {}}
+        />
         <View style={styles.sep} />
-        <Row icon="shield-checkmark-outline" label="Privacy & security" onPress={() => {}} />
+        <Row
+          icon="shield-checkmark-outline"
+          label="Privacy & security"
+          onPress={() => {}}
+        />
       </ThemedView>
 
       {/* Footer actions */}

@@ -1,6 +1,15 @@
 // app.config.js
 require("dotenv").config();
 
+const IS_DEV = process.env.APP_ENV === "development";
+const IS_PREVIEW = process.env.APP_ENV === "preview";
+
+const getBundleId = () => {
+  if (IS_DEV) return "com.hopln.app.dev";
+  if (IS_PREVIEW) return "com.hopln.app.preview";
+  return "com.hopln.app";
+};
+
 module.exports = {
   expo: {
     name: "hopln",
@@ -12,53 +21,72 @@ module.exports = {
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
 
+    ios: {
+      bundleIdentifier: getBundleId(),
+      buildNumber: "1",
+      supportsTablet: true,
+      infoPlist: {
+        NSLocationWhenInUseUsageDescription:
+          "We use your location to show nearby stages.",
+        ITSAppUsesNonExemptEncryption: false,
+      },
+    },
+
+    android: {
+      package: getBundleId(),
+      versionCode: 1,
+      adaptiveIcon: {
+        backgroundColor: "#E6F4FE",
+        foregroundImage: "./assets/images/android-icon-foreground.png",
+        monochromeImage: "./assets/images/android-icon-monochrome.png",
+      },
+      edgeToEdgeEnabled: true,
+      predictiveBackGestureEnabled: false,
+      permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+    },
+
+    web: {
+      output: "static",
+      favicon: "./assets/images/favicon.png",
+    },
+
     plugins: [
       "expo-router",
       [
         "@rnmapbox/maps",
         {
           RNMapboxMapsImpl: "mapbox",
-          RNMapboxMapsDownloadToken: process.env.MAPBOX_DOWNLOADS_TOKEN || ""
-        }
-      ]
-    ],
-
-    ios: {
-      supportsTablet: true,
-      infoPlist: {
-        NSLocationWhenInUseUsageDescription:
-          "We use your location to show nearby stages."
-        // If you ever add background tracking, also add:
-        // UIBackgroundModes: ["location"]
-      }
-    },
-
-    android: {
-        package: "com.arden28.hopln",
-        adaptiveIcon: {
-            backgroundColor: "#E6F4FE",
-            foregroundImage: "./assets/images/android-icon-foreground.png",
-            monochromeImage: "./assets/images/android-icon-monochrome.png"
+          RNMapboxMapsDownloadToken: process.env.MAPBOX_DOWNLOADS_TOKEN || "",
         },
-        edgeToEdgeEnabled: true,
-        predictiveBackGestureEnabled: false,
-        permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
-    },
+      ],
+      [
+        "expo-splash-screen",
+        {
+          image: "./assets/images/splash-icon.png",
+          imageWidth: 200,
+          resizeMode: "contain",
+          backgroundColor: "#ffffff",
+          dark: {
+            backgroundColor: "#000000",
+          },
+        },
+      ],
+    ],
 
     experiments: {
       typedRoutes: true,
-      reactCompiler: true
+      reactCompiler: true,
     },
 
-    // You don't *need* to forward EXPO_PUBLIC_* via extra,
-    // but it's handy for non-public vars or for reading in code via Constants.expoConfig.extra.
     extra: {
       router: {},
-      mapboxToken: process.env.EXPO_PUBLIC_MAPBOX_TOKEN,         // optional mirror
-      mapboxStyleUrl: process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL,  // optional mirror
-      eas: { projectId: "acc62a4b-150f-4ea6-b0f3-296dca0d6683" }
+      mapboxToken: process.env.EXPO_PUBLIC_MAPBOX_TOKEN,
+      mapboxStyleUrl: process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL,
+      eas: {
+        projectId: "acc62a4b-150f-4ea6-b0f3-296dca0d6683",
+      },
     },
 
-    owner: "arden28"
-  }
+    owner: "arden28",
+  },
 };

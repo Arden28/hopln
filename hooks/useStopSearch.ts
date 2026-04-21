@@ -1,69 +1,139 @@
+// hooks/useStopSearch.ts
 import { Storage } from "@/app/lib/storage";
-import { fuse, type SearchableStop } from "@/search";
-import { useEffect, useMemo, useState } from "react";
+import { fuse } from "@/search";
+import { UnifiedLocation } from "@/store/journeyStore";
+import Constants from "expo-constants";
+import { useEffect, useState } from "react";
 
 type Coords = { latitude: number; longitude: number };
-const RECENTS_KEY = "stop-recents-v1";
+const RECENTS_KEY = "location-recents-v1";
 
-// --- SAFE STORAGE SHIM (prevents crashes if native module not ready) ---
+const extra = (Constants?.expoConfig?.extra ?? {}) as any;
+const MAPBOX_TOKEN =
+  (process.env.EXPO_PUBLIC_MAPBOX_TOKEN as string) ||
+  (extra.mapboxToken as string);
+
+// --- SAFE STORAGE SHIM ---
 const memoryStore = new Map<string, string>();
-const SafeStorage = Storage ?? ({
-  async getItem(key: string) { return memoryStore.get(key) ?? null; },
-  async setItem(key: string, val: string) { memoryStore.set(key, val); },
-  async removeItem(key: string) { memoryStore.delete(key); },
-} as Pick<typeof Storage, "getItem" | "setItem" | "removeItem">);
-// ----------------------------------------------------------------------
+const SafeStorage =
+  Storage ??
+  ({
+    async getItem(key: string) {
+      return memoryStore.get(key) ?? null;
+    },
+    async setItem(key: string, val: string) {
+      memoryStore.set(key, val);
+    },
+    async removeItem(key: string) {
+      memoryStore.delete(key);
+    },
+  } as Pick<typeof Storage, "getItem" | "setItem" | "removeItem">);
+
+function dMeters(a: Coords, b: Coords) {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 6371e3;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.latitude)) *
+      Math.cos(toRad(b.latitude)) *
+      Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
 
 export function useStopSearch(query: string, me: Coords | null) {
-  const [recents, setRecents] = useState<SearchableStop[]>([]);
+  const [recents, setRecents] = useState<UnifiedLocation[]>([]);
+  const [matches, setMatches] = useState<
+    { item: UnifiedLocation; blended: number }[]
+  >([]);
 
+  // Load Recents
   useEffect(() => {
-    let mounted = true;
     (async () => {
       try {
         const s = await SafeStorage.getItem(RECENTS_KEY);
-        if (mounted && s) setRecents(JSON.parse(s));
-      } catch {
-        // ignore; fall back to empty
-      }
+        if (s) setRecents(JSON.parse(s));
+      } catch {}
     })();
-    return () => { mounted = false; };
   }, []);
 
-  const results = useMemo(() => {
+  // Perform Parallel Search
+  useEffect(() => {
     const q = query.trim();
-    if (q.length === 0) return { recents, matches: [] as any[] };
+    if (q.length === 0) {
+      setMatches([]);
+      return;
+    }
 
-    const raw = fuse.search(q, { limit: 100 });
+    const searchTimeout = setTimeout(async () => {
+      // 1. Local Fuse Search (Stops)
+      const rawLocal = fuse.search(q, { limit: 15 });
+      const localMatches = rawLocal.map((r) => {
+        const s = r.item;
+        const prox = me
+          ? 1 / Math.max(50, dMeters(me, { latitude: s.lat, longitude: s.lng }))
+          : 0;
+        const blended = 0.7 * (1 - (r.score ?? 0)) + 0.3 * prox;
+        return {
+          item: {
+            _type: "stop" as const,
+            id: s.id,
+            name: s.name,
+            lat: s.lat,
+            lng: s.lng,
+            route_ids: s.route_ids || undefined,
+          },
+          blended,
+        };
+      });
 
-    const dMeters = (a: Coords, b: Coords) => {
-      const toRad = (d: number) => (d * Math.PI) / 180;
-      const R = 6371e3;
-      const dLat = toRad(b.latitude - a.latitude);
-      const dLon = toRad(b.longitude - a.longitude);
-      const la1 = toRad(a.latitude);
-      const la2 = toRad(b.latitude);
-      const x = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
-      return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-    };
+      // 2. Mapbox Geocoding (Places/Addresses in Kenya)
+      let remoteMatches: { item: UnifiedLocation; blended: number }[] = [];
+      if (q.length > 2) {
+        try {
+          const proxParam = me
+            ? `&proximity=${me.longitude},${me.latitude}`
+            : "";
+          const res = await fetch(
+            `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&country=ke&types=poi,address,place${proxParam}`,
+          );
+          const json = await res.json();
 
-    const scored = raw.map((r) => {
-      const s = r.item;
-      const prox = me ? 1 / Math.max(50, dMeters(me, { latitude: s.lat, longitude: s.lng })) : 0;
-      const pop = (s.popularity ?? 0) / 1000;
-      const blended = 0.7 * (1 - (r.score ?? 0)) + 0.2 * prox + 0.1 * pop;
-      return { ...r, blended };
-    });
+          if (json.features) {
+            remoteMatches = json.features.map((f: any, idx: number) => ({
+              item: {
+                _type: "location" as const,
+                id: f.id,
+                name: f.text,
+                lat: f.center[1],
+                lng: f.center[0],
+              },
+              blended: 0.8 - idx * 0.05, // Fake score, prioritizing Mapbox's top results
+            }));
+          }
+        } catch (e) {
+          console.warn("Geocoding failed", e);
+        }
+      }
 
-    scored.sort((a, b) => b.blended - a.blended);
-    return { recents, matches: scored.slice(0, 30) };
-  }, [query, me?.latitude, me?.longitude, recents]);
+      // 3. Merge and Sort
+      const combined = [...localMatches, ...remoteMatches].sort(
+        (a, b) => b.blended - a.blended,
+      );
+      setMatches(combined);
+    }, 300); // 300ms debounce to save API calls
 
-  const pushRecent = async (s: SearchableStop) => {
+    return () => clearTimeout(searchTimeout);
+  }, [query, me?.latitude, me?.longitude]);
+
+  const pushRecent = async (s: UnifiedLocation) => {
     const next = [s, ...recents.filter((r) => r.id !== s.id)].slice(0, 6);
     setRecents(next);
-    try { await SafeStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch {}
+    try {
+      await SafeStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+    } catch {}
   };
 
-  return { ...results, pushRecent };
+  return { recents, matches, pushRecent };
 }
