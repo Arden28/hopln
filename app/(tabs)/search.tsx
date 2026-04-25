@@ -1,11 +1,10 @@
 // app/(tabs)/search.tsx
-import { Route, routes as routesData } from "@/data/routes";
-import { stops as allStops } from "@/data/stops";
 import { useStopSearch } from "@/hooks/useStopSearch";
+import { RouteService,  type Route } from "@/services/route";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
 import { Highlight } from "@/ui/Highlight";
+import * as Location from "expo-location";
 
-import { dMeters } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -15,12 +14,18 @@ import {
   Dimensions,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+
+import {
+  getRouteColor,
+} from "@/utils/mapHelpers";
 
 const COLORS = {
   background: "#FFFFFF",
@@ -40,10 +45,10 @@ export default function SearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const [currentLocation, setCurrentLocation] = useState<UnifiedLocation | null>(null);
   const [fromQ, setFromQ] = useState("");
   const [toQ, setToQ] = useState("");
 
-  // Swapped from Stop to UnifiedLocation to handle both bus stops and Geocoded addresses
   const [fromLoc, setFromLoc] = useState<UnifiedLocation | null>(null);
   const [toLoc, setToLoc] = useState<UnifiedLocation | null>(null);
 
@@ -55,15 +60,30 @@ export default function SearchScreen() {
   const activeQuery = focusedField === "from" ? fromQ : toQ;
   const { matches, recents, pushRecent } = useStopSearch(activeQuery, null);
 
-  // ── API & ANIMATION STATE ──
   const sheetAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [isFetchingRoutes, setIsFetchingRoutes] = useState(false);
 
-  // Trigger animation & simulated API call when both points are selected
+  // Get current GPS location once when screen opens
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        const pos = await Location.getCurrentPositionAsync({});
+        setCurrentLocation({
+          _type: "location",
+          id: "current_location",
+          name: "Current Location",
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+      }
+    })();
+  }, []);
+
+  // ── THE API HANDOFF ──
   useEffect(() => {
     if (fromLoc && toLoc) {
-      // 1. Slide the sheet up immediately
       Animated.spring(sheetAnim, {
         toValue: 0,
         useNativeDriver: true,
@@ -71,59 +91,22 @@ export default function SearchScreen() {
         stiffness: 90,
       }).start();
 
-      // 2. Show loading spinner
       setIsFetchingRoutes(true);
 
-      // 3. Process Spatial Fallback & Intersection (Debounced slightly for UI smoothness)
-      const fetchTimer = setTimeout(() => {
-        // Helper: Extract route IDs. If it's a mapbox address, find nearby stops physically.
-        const extractRouteIds = (loc: UnifiedLocation) => {
-          if (loc._type === "stop" && loc.route_ids) {
-            return loc.route_ids.split(",").map((id: string) => id.trim());
-          }
+      // Call the Laravel Backend!
+      const fetchRoutes = async () => {
+        try {
+          const routes = await RouteService.calculateJourney(fromLoc, toLoc);
+          setAvailableRoutes(routes);
+        } catch (error) {
+          console.error("Failed to fetch routes:", error);
+          setAvailableRoutes([]);
+        } finally {
+          setIsFetchingRoutes(false);
+        }
+      };
 
-          // Spatial Fallback for Addresses
-          const nearbyStops = allStops.filter((s) => {
-            const dist = dMeters(
-              { latitude: loc.lat, longitude: loc.lng },
-              { latitude: s.lat, longitude: s.lng },
-            );
-            return dist <= 600; // 600 meters max walking distance to a stop
-          });
-
-          const nearbyRouteIds = new Set<string>();
-          nearbyStops.forEach((s) => {
-            if (s.route_ids) {
-              s.route_ids
-                .split(",")
-                .forEach((id) => nearbyRouteIds.add(id.trim()));
-            }
-          });
-          return Array.from(nearbyRouteIds);
-        };
-
-        const fromIds = extractRouteIds(fromLoc);
-        const toIds = extractRouteIds(toLoc);
-
-        // Find intersecting routes
-        const commonIds = fromIds.filter(
-          (id) => toIds.includes(id) && id !== "",
-        );
-
-        const matchedRoutes = commonIds
-          .map((id) => routesData.find((r) => r.route_id === id))
-          .filter((r): r is Route => r !== undefined);
-
-        // Deduplicate routes
-        const uniqueRoutes = Array.from(
-          new Map(matchedRoutes.map((r) => [r.route_id, r])).values(),
-        );
-
-        setAvailableRoutes(uniqueRoutes);
-        setIsFetchingRoutes(false);
-      }, 400);
-
-      return () => clearTimeout(fetchTimer);
+      fetchRoutes();
     } else {
       Animated.timing(sheetAnim, {
         toValue: SCREEN_HEIGHT,
@@ -134,9 +117,17 @@ export default function SearchScreen() {
     }
   }, [fromLoc, toLoc, sheetAnim]);
 
-  // ── SEARCH SUGGESTIONS ──
   const data = useMemo(() => {
     const rows: any[] = [];
+
+    if (focusedField === "from" && currentLocation) {
+      rows.push({
+        _type: "current-location",
+        location: currentLocation,
+        key: "current-location",
+      });
+    }
+
     if (!activeQuery && recents.length > 0) {
       rows.push({ _type: "header", title: "Recent", key: "hdr-recent" });
       for (const r of recents)
@@ -150,11 +141,10 @@ export default function SearchScreen() {
         key: "hdr-results",
       });
       for (const m of matches) {
-        const nameMatch = m.item.name; // In a full implementation, you'd remap fuse indices here
         rows.push({
           _type: "result",
           location: m.item,
-          nameRanges: [], // Provide ranges here if using Fuse highlight mapping
+          nameRanges: [],
           key: `res-${m.item.id}`,
         });
       }
@@ -187,7 +177,7 @@ export default function SearchScreen() {
   function onSelectRoute(route: Route) {
     if (fromLoc && toLoc) {
       setJourney(fromLoc, toLoc, route);
-      router.replace("/map"); // or router.navigate('/') depending on your routing setup
+      router.replace("/map");
     }
   }
 
@@ -310,20 +300,39 @@ export default function SearchScreen() {
     <View style={styles.container}>
       {HeaderBar}
 
-      {/* ── BACKGROUND SEARCH LIST ── */}
       <FlatList
         data={data}
         keyExtractor={(item) => item.key}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => {
+
+          if (item._type === "current-location") {
+            return (
+              <Pressable
+                onPress={() => onSelectLocation(item.location)}
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              >
+                <View style={[styles.iconContainer, { backgroundColor: COLORS.blue }]}>
+                  <Ionicons name="locate" size={20} color="#FFFFFF" />
+                </View>
+                <View style={styles.rowContent}>
+                  <Text style={styles.rowText} numberOfLines={1}>
+                    {item.location.name}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }}>
+                    Use my current location
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          }
+
           if (item._type === "header") {
             return <Text style={styles.sectionTitle}>{item.title}</Text>;
           }
 
           const loc = item.location as UnifiedLocation;
-
-          // Differentiate icons based on type!
           let IconName: any = "location-outline";
           if (item._type === "recent") IconName = "time-outline";
           else if (loc._type === "stop") IconName = "bus-outline";
@@ -346,13 +355,13 @@ export default function SearchScreen() {
                     ranges={item.nameRanges.map((indices: any) => ({
                       indices,
                     }))}
+                    
                   />
                 ) : (
                   <Text style={styles.rowText} numberOfLines={1}>
                     {loc.name}
                   </Text>
                 )}
-                {/* Optional Subtext for addresses */}
                 {loc._type === "location" && (
                   <Text
                     style={{
@@ -364,13 +373,59 @@ export default function SearchScreen() {
                     Mapbox Address
                   </Text>
                 )}
+
+                {/* ── Badge Design for Serving Lines ── */}
+                {loc._type === "stop" && loc.route_nams && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                    <Text style={{ fontSize: 12, color: COLORS.subtext, marginRight: 6, fontWeight: "500" }}>
+                      Serves
+                    </Text>
+                    {/* Horizontal scroll prevents the row from getting too tall if there are 10+ lines */}
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false} 
+                      contentContainerStyle={{ alignItems: 'center' }}
+                      pointerEvents="none" 
+                    >
+                      {loc.route_nams.split(',').map((routeName, index) => {
+                        const cleanName = routeName.trim();
+                        const badgeColor = getRouteColor(cleanName); // <-- Grab the dynamic color!
+
+                        return (
+                          <View
+                            key={index}
+                            style={{
+                              backgroundColor: `${badgeColor}15`, // 15% opacity of the line color
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              borderRadius: 6,
+                              marginRight: 6,
+                              borderWidth: StyleSheet.hairlineWidth,
+                              borderColor: `${badgeColor}30`, // 30% opacity for the border
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: "700",
+                                color: badgeColor, // Full opacity for the text
+                              }}
+                            >
+                              {cleanName}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
               </View>
             </Pressable>
           );
         }}
       />
 
-      {/* ── ANIMATED BOTTOM SHEET FOR ROUTES ── */}
       <Animated.View
         style={[
           styles.bottomSheet,
@@ -403,48 +458,65 @@ export default function SearchScreen() {
         ) : (
           <FlatList
             data={availableRoutes}
-            keyExtractor={(item) => `route-${item.route_id}`}
+            keyExtractor={(item, index) => `route-${index}`}
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
-            renderItem={({ item: route }) => (
-              <Pressable
-                onPress={() => onSelectRoute(route)}
-                style={({ pressed }) => [
-                  styles.routeCardItem,
-                  pressed && styles.rowPressed,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.iconContainer,
-                    { backgroundColor: COLORS.primary },
+            renderItem={({ item: route }) => {
+              
+              // Build a dynamic title based on the segments ──
+              const title = route.type === 'transfer' && route.segments.length > 1
+                ? `Line ${route.segments[0]?.route_name} ➔ ${route.segments[1]?.route_name}`
+                : `Line ${route.segments[0]?.route_name}`;
+
+              return (
+                <Pressable
+                  onPress={() => onSelectRoute(route)}
+                  style={({ pressed }) => [
+                    styles.routeCardItem,
+                    pressed && styles.rowPressed,
                   ]}
                 >
-                  <Ionicons name="bus" size={20} color="#FFFFFF" />
-                </View>
-                <View style={styles.rowContent}>
-                  <Text
-                    style={[styles.rowText, { fontWeight: "700" }]}
-                    numberOfLines={1}
+                  <View
+                    style={[
+                      styles.iconContainer,
+                      { backgroundColor: route.type === 'transfer' ? COLORS.blue : COLORS.primary },
+                    ]}
                   >
-                    Line {route.route_short_name}
-                  </Text>
-                  <Text
-                    style={{
-                      color: COLORS.subtext,
-                      fontSize: 13,
-                      marginTop: 2,
-                    }}
-                  >
-                    {route.route_long_name}
-                  </Text>
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={COLORS.border}
-                />
-              </Pressable>
-            )}
+                    <Ionicons 
+                      name={route.type === 'transfer' ? "git-network-outline" : "bus"} 
+                      size={20} 
+                      color="#FFFFFF" 
+                    />
+                  </View>
+                  <View style={styles.rowContent}>
+                    
+                    {/* Display the dynamic line numbers here */}
+                    <Text
+                      style={[styles.rowText, { fontWeight: "700" }]}
+                      numberOfLines={1}
+                    >
+                      {title}
+                    </Text>
+                    
+                    {/* Keep the summary text underneath for extra context */}
+                    <Text
+                      style={{
+                        color: COLORS.subtext,
+                        fontSize: 13,
+                        marginTop: 2,
+                      }}
+                    >
+                      {route.summary}
+                    </Text>
+                    
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={COLORS.border}
+                  />
+                </Pressable>
+              );
+            }}
           />
         )}
       </Animated.View>
@@ -452,12 +524,8 @@ export default function SearchScreen() {
   );
 }
 
-// Ensure you keep your existing styles object at the bottom of the file!
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
   headerContainer: {
     backgroundColor: COLORS.background,
     paddingBottom: 16,
@@ -472,14 +540,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 16,
   },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: "600",
-    color: COLORS.text,
-  },
-  backBtn: {
-    marginLeft: -8,
-  },
+  headerTitle: { fontSize: 17, fontWeight: "600", color: COLORS.text },
+  backBtn: { marginLeft: -8 },
   routeCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -507,42 +569,15 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
     marginVertical: 4,
   },
-  squareTo: {
-    width: 8,
-    height: 8,
-    backgroundColor: COLORS.text,
-  },
-  inputStack: {
-    flex: 1,
-  },
-  inputWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  input: {
-    flex: 1,
-    height: 44,
-    color: COLORS.text,
-    fontSize: 16,
-  },
+  squareTo: { width: 8, height: 8, backgroundColor: COLORS.text },
+  inputStack: { flex: 1 },
+  inputWrapper: { flexDirection: "row", alignItems: "center" },
+  input: { flex: 1, height: 44, color: COLORS.text, fontSize: 16 },
   inputFocused: {},
-  clearBtn: {
-    padding: 8,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: COLORS.border,
-    marginLeft: 0,
-  },
-  swapBtn: {
-    padding: 8,
-    marginLeft: 4,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 100,
-    paddingTop: 8,
-  },
+  clearBtn: { padding: 8 },
+  divider: { height: 1, backgroundColor: COLORS.border, marginLeft: 0 },
+  swapBtn: { padding: 8, marginLeft: 4 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 100, paddingTop: 8 },
   sectionTitle: {
     color: COLORS.subtext,
     fontSize: 13,
@@ -552,14 +587,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  rowPressed: {
-    opacity: 0.5,
-  },
+  row: { flexDirection: "row", alignItems: "center", paddingVertical: 12 },
+  rowPressed: { opacity: 0.5 },
   iconContainer: {
     width: 36,
     height: 36,
@@ -576,10 +605,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     marginTop: 12,
   },
-  rowText: {
-    color: COLORS.text,
-    fontSize: 16,
-  },
+  rowText: { color: COLORS.text, fontSize: 16 },
   bottomSheet: {
     position: "absolute",
     left: 0,
@@ -610,11 +636,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
   },
-  sheetTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: COLORS.text,
-  },
+  sheetTitle: { fontSize: 20, fontWeight: "700", color: COLORS.text },
   routeCardItem: {
     flexDirection: "row",
     alignItems: "center",

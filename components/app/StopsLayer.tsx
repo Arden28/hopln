@@ -1,4 +1,3 @@
-// components/StopsLayer.tsx
 import MapboxGL from "@rnmapbox/maps";
 import type { FeatureCollection, Point } from "geojson";
 import React, { useMemo } from "react";
@@ -6,9 +5,8 @@ import React, { useMemo } from "react";
 type Stop = { id: string; name: string; lat: number; lng: number };
 
 const STOPS_MIN_ZOOM = 13.0;
-const STOPS_LIMIT = 400; // safety cap (keep it smooth)
+const STOPS_LIMIT = 400;
 
-// Zoom → radius (meters)
 function radiusForZoom(zoom: number) {
   if (zoom < 13) return 0;
   if (zoom < 14) return 1800;
@@ -17,6 +15,7 @@ function radiusForZoom(zoom: number) {
   if (zoom < 17) return 450;
   return 320;
 }
+
 function dMeters(
   a: { latitude: number; longitude: number },
   b: { latitude: number; longitude: number },
@@ -32,6 +31,7 @@ function dMeters(
     Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
+
 function degBoxForRadiusMeters(lat: number, rMeters: number) {
   const dLat = rMeters / 111320;
   const dLon =
@@ -54,7 +54,6 @@ export default function StopsLayer({
   selected,
   onPress,
 }: Props) {
-  // Progressive filter by zoom + radius (and cap)
   const filtered: Stop[] = useMemo(() => {
     if (!viewCenter || viewZoom < STOPS_MIN_ZOOM) return [];
     const r = radiusForZoom(viewZoom);
@@ -87,14 +86,12 @@ export default function StopsLayer({
       .slice(0, STOPS_LIMIT)
       .map((x) => x.s);
 
-    // Ensure selected stop is always included (radius exception)
     if (selected && !within.some((w) => w.id === selected.id)) {
       within.push(selected);
     }
     return within;
   }, [allStops, viewCenter?.lat, viewCenter?.lng, viewZoom, selected?.id]);
 
-  // Build a stable key so we don't retile if the set hasn't actually changed
   const idsKey = useMemo(
     () =>
       filtered
@@ -111,10 +108,10 @@ export default function StopsLayer({
         type: "Feature",
         id: s.id,
         properties: { id: s.id, name: s.name },
-        geometry: { type: "Point", coordinates: [s.lng, s.lat] },
+        geometry: { type: "Point", coordinates: [Number(s.lng), Number(s.lat)] }, 
       })),
     }),
-    [idsKey], // depend on stable ids, not array identity
+    [idsKey], 
   );
 
   const selectedFC: FeatureCollection<Point> | null = useMemo(() => {
@@ -128,7 +125,7 @@ export default function StopsLayer({
           properties: { id: selected.id, name: selected.name, selected: true },
           geometry: {
             type: "Point",
-            coordinates: [selected.lng, selected.lat],
+            coordinates: [Number(selected.lng), Number(selected.lat)],
           },
         },
       ],
@@ -137,7 +134,6 @@ export default function StopsLayer({
 
   return (
     <>
-      {/* Main stops (progressive + zoom-gated). Tolerance reduces per-tile memory churn. */}
       <MapboxGL.ShapeSource
         id="stops"
         shape={stopsFC}
@@ -157,23 +153,43 @@ export default function StopsLayer({
             iconIgnorePlacement: true,
             iconAnchor: "center",
             iconOffset: [0, -4],
+            
+            // ── NEW TEXT STYLES ──
+            textField: "{name}", // Pulls the 'name' from GeoJSON properties
+            textSize: 11,
+            textColor: "#333333", // Dark gray for non-selected stops
+            textHaloColor: "#FFFFFF",
+            textHaloWidth: 1.5,
+            textAnchor: "top", // Places text below the pin
+            textOffset: [0, 0.8], // Slight spacing from the pin
+            textAllowOverlap: false, // Hides text if it collides with another stop's text
+            textOptional: true, // If text is hidden, keep the pin visible!
           }}
         />
       </MapboxGL.ShapeSource>
 
-      {/* Selected stop always visible (no zoom/radius gating) */}
       {!!selectedFC && (
         <MapboxGL.ShapeSource id="stops-selected" shape={selectedFC}>
           <MapboxGL.SymbolLayer
             id="stops-selected-symbol"
             style={{
               iconImage: "matatu-pin",
-              iconSize: 0.033,
+              iconSize: 0.035, // Slightly bigger when selected
               iconRotationAlignment: "viewport",
               iconAllowOverlap: true,
               iconIgnorePlacement: true,
               iconAnchor: "center",
               iconOffset: [0, -4],
+              
+              // ── HIGHLIGHTED TEXT STYLES ──
+              textField: "{name}",
+              textSize: 13,
+              textColor: "#FF6F00", // Mova Orange to make it pop
+              textHaloColor: "#FFFFFF",
+              textHaloWidth: 2,
+              textAnchor: "top",
+              textOffset: [0, 1],
+              textAllowOverlap: true, // Selected text MUST always show
             }}
           />
         </MapboxGL.ShapeSource>

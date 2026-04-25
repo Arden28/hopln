@@ -1,3 +1,5 @@
+import { Stop } from "./stops";
+
 export interface Agency {
   agency_id: string;
   agency_name: string;
@@ -35,6 +37,10 @@ export interface Route {
   route_short_name: string;
   route_long_name: string;
   route_type: number;
+  trip_id?: string;
+  shape_points?: [number, number][]; // Array of [longitude, latitude] arrays
+  board_stop?: Stop;
+  alight_stop?: Stop;
 }
 
 export const routes: Route[] = [

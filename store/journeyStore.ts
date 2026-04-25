@@ -1,5 +1,5 @@
 // store/journeyStore.ts
-import type { Route } from "@/data/routes";
+import type { Route } from "@/services/route";
 import { create } from "zustand";
 
 export type TripStatus = "IDLE" | "WAITING_FOR_BUS" | "IN_TRANSIT" | "ARRIVED";
@@ -11,7 +11,8 @@ export interface UnifiedLocation {
   name: string;
   lat: number;
   lng: number;
-  route_ids?: string; // Only stops have this
+  route_ids?: string; 
+  route_nams?: string;
 }
 
 interface JourneyState {

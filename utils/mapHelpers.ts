@@ -186,3 +186,48 @@ export function stepIcon(
   if (t === "new name") return "compass-outline";
   return "walk-outline";
 }
+
+const TRANSIT_COLORS = [
+  "#FF6F00", // Hopln Orange
+  "#007AFF", // iOS Blue
+  "#34C759", // Green
+  "#AF52DE", // Purple
+  "#FF2D55", // Pink
+  "#5AC8FA", // Light Blue
+  "#FF9500", // Amber
+];
+
+
+/**
+ * Generates a consistent, highly distinct, and vibrant HEX color from a route name.
+ * Provides 360 distinct colors to prevent transfer collisions.
+ */
+export function getRouteColor(routeName: string): string {
+  if (!routeName) return "#FF6F00"; // Mova Orange fallback
+
+  // 1. Generate a deterministic hash from the string
+  let hash = 0;
+  for (let i = 0; i < routeName.length; i++) {
+    hash = routeName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  // 2. Map the hash to a Hue (0 to 360 degrees on the color wheel)
+  const h = Math.abs(hash) % 360;
+  
+  // 3. Set Saturation to 85% (vibrant) and Lightness to 45% (readable on maps)
+  const s = 85; 
+  const l = 45; 
+
+  // 4. Convert HSL to strict 6-character HEX
+  const lNorm = l / 100;
+  const a = (s * Math.min(lNorm, 1 - lNorm)) / 100;
+  
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = lNorm - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    // Convert to hex and pad with zeros
+    return Math.round(255 * color).toString(16).padStart(2, '0');
+  };
+
+  return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
+}

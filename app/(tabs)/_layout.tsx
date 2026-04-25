@@ -1,102 +1,104 @@
 import { AvatarButton, MinimalistTitle } from "@/components/app/Header";
 import { HapticTab } from "@/components/haptic-tab";
 import TabBarBackground from "@/components/ui/TabBarBackground";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React from "react";
-import { Platform, useColorScheme } from "react-native";
+import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const ORANGE = "#FF6F00";
+// Context-specific colors
+const ORANGE = "#FF6F00"; 
+const INACTIVE_BLACK = "#1A1A1A"; // Changed from Grey to Dark for higher contrast
 
 export default function TabsLayout() {
-  const colorScheme = useColorScheme();
-
-  // Gets device-specific safe boundaries (notches, dynamic islands, etc.)
   const insets = useSafeAreaInsets();
 
   return (
     <Tabs
-      // --- GLOBAL SCREEN PADDING ---
-      // This applies a global padding to all screens so they don't hide under the transparent header
       sceneContainerStyle={{
-        paddingTop: insets.top + 60, // Safe area top + header height
-        backgroundColor: "#F8F9FA", // Light neutral background for the whole app
+        backgroundColor: "#FFFFFF",
       }}
       screenOptions={{
-        // --- HEADER STYLING ---
         headerTitle: "",
         headerLeft: () => <MinimalistTitle />,
         headerRight: () => <AvatarButton />,
-        headerTransparent: true,
+        headerTransparent: false,
         headerShadowVisible: false,
+        headerStyle: {
+          backgroundColor: "#FFFFFF",
+          borderBottomWidth: 0.5,
+          borderBottomColor: "#E5E5E5",
+          // Adjusted height slightly for a tighter look
+          height: Platform.OS === "ios" ? 100 : 70, 
+        },
+    
+        headerLeftContainerStyle: { paddingLeft: 0 },
+        headerRightContainerStyle: { paddingRight: 0 },
 
         // --- TAB BAR STYLING ---
-        tabBarShowLabel: true, // Restored the labels
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: "600",
-          marginBottom: Platform.OS === "ios" ? 0 : 4, // Minor visual tweak for Android
-        },
+        tabBarShowLabel: false,
         tabBarActiveTintColor: ORANGE,
-        tabBarInactiveTintColor: "#8E8E93",
+        tabBarInactiveTintColor: INACTIVE_BLACK, // Apply the new dark color here
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
-        tabBarStyle: Platform.select({
-          ios: {
-            position: "relative", // Made solid, no longer floating
-            backgroundColor: "#FFFFFF",
-            borderTopWidth: 1,
-            borderTopColor: "#F0F0F0", // Subtle border to separate from content
-            elevation: 0,
-            height: 85, // Standard solid height for iOS
-          },
-          android: {
-            backgroundColor: "#FFFFFF",
-            borderTopWidth: 1,
-            borderTopColor: "#F0F0F0",
-            elevation: 8,
-            height: 65,
-            paddingBottom: 8, // Gives the text breathing room
-          },
-        }),
+        tabBarStyle: {
+          backgroundColor: "#FFFFFF",
+          borderTopWidth: 0, // 0.5
+          borderTopColor: "#E5E5E5",
+          elevation: 0,
+          shadowOpacity: 0,
+          height: Platform.OS === "ios" ? 50 + insets.bottom : 64,
+          paddingBottom: Platform.OS === "ios" ? insets.bottom - 10 : 0, 
+        },
       }}
     >
       <Tabs.Screen
         name="home"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color, focused, size }) => (
-            <Ionicons
-              name={focused ? "home" : "home-outline"}
-              size={size}
-              color={color}
-            />
+          tabBarIcon: ({ color, focused }) => (
+            // Feather Home looks great, but we use a slightly larger size when focused
+            <Feather name="home" size={focused ? 26 : 24} color={color} />
           ),
         }}
       />
+
       <Tabs.Screen
         name="map"
         options={{
-          title: "Map",
           headerShown: false,
-          tabBarIcon: ({ color, focused, size }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "map" : "map-outline"}
-              size={size}
+              size={24}
               color={color}
             />
           ),
         }}
       />
+
       <Tabs.Screen
         name="search"
         options={{
-          title: "Search",
-          tabBarIcon: ({ color, focused, size }) => (
+          headerShown: false,
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "search" : "search-outline"}
-              size={size + 2}
+              size={26}
+              color={color}
+            />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="profile"
+        options={{
+          headerShown: false,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "person-circle" : "person-circle-outline"}
+              size={28}
               color={color}
             />
           ),

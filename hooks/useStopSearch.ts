@@ -1,6 +1,6 @@
 // hooks/useStopSearch.ts
 import { Storage } from "@/app/lib/storage";
-import { fuse } from "@/search";
+import { StopService } from "@/services/stop";
 import { UnifiedLocation } from "@/store/journeyStore";
 import Constants from "expo-constants";
 import { useEffect, useState } from "react";
@@ -58,45 +58,40 @@ export function useStopSearch(query: string, me: Coords | null) {
     })();
   }, []);
 
-  // Perform Parallel Search
+  // Perform Search
   useEffect(() => {
     const q = query.trim();
-    if (q.length === 0) {
+    if (q.length < 2) {
       setMatches([]);
       return;
     }
 
     const searchTimeout = setTimeout(async () => {
-      // 1. Local Fuse Search (Stops)
-      const rawLocal = fuse.search(q, { limit: 15 });
-      const localMatches = rawLocal.map((r) => {
-        const s = r.item;
-        const prox = me
-          ? 1 / Math.max(50, dMeters(me, { latitude: s.lat, longitude: s.lng }))
-          : 0;
-        const blended = 0.7 * (1 - (r.score ?? 0)) + 0.3 * prox;
-        return {
+      try {
+        // 1. QUERY YOUR LOCAL POI LAYER FIRST
+        const backendStops = await StopService.searchStops(q);
+        
+        let localMatches = backendStops.map((s, idx) => ({
           item: {
             _type: "stop" as const,
             id: s.id,
             name: s.name,
             lat: s.lat,
             lng: s.lng,
-            route_ids: s.route_ids || undefined,
+            route_nams: s.route_nams,
           },
-          blended,
-        };
-      });
+          // Assign a fake high score so these always stay at the top
+          blended: 1.0 - (idx * 0.01), 
+        }));
 
-      // 2. Mapbox Geocoding (Places/Addresses in Kenya)
-      let remoteMatches: { item: UnifiedLocation; blended: number }[] = [];
-      if (q.length > 2) {
-        try {
-          const proxParam = me
-            ? `&proximity=${me.longitude},${me.latitude}`
-            : "";
+        // 2. FALLBACK TO MAPBOX IF NEEDED
+        // If your database found less than 3 stages, the user is probably 
+        // looking for a specific address or building. Call Mapbox!
+        let remoteMatches: any[] = [];
+        if (localMatches.length < 3) {
+          const proxParam = me ? `&proximity=${me.longitude},${me.latitude}` : "";
           const res = await fetch(
-            `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&country=ke&types=poi,address,place${proxParam}`,
+            `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&country=ke&types=poi,address,place${proxParam}`
           );
           const json = await res.json();
 
@@ -109,20 +104,22 @@ export function useStopSearch(query: string, me: Coords | null) {
                 lat: f.center[1],
                 lng: f.center[0],
               },
-              blended: 0.8 - idx * 0.05, // Fake score, prioritizing Mapbox's top results
+              // Mapbox results get a slightly lower score so they sit below Matatu stages
+              blended: 0.8 - (idx * 0.05),
             }));
           }
-        } catch (e) {
-          console.warn("Geocoding failed", e);
         }
-      }
 
-      // 3. Merge and Sort
-      const combined = [...localMatches, ...remoteMatches].sort(
-        (a, b) => b.blended - a.blended,
-      );
-      setMatches(combined);
-    }, 300); // 300ms debounce to save API calls
+        // 3. COMBINE AND DISPLAY
+        const combined = [...localMatches, ...remoteMatches].sort(
+          (a, b) => b.blended - a.blended,
+        );
+        setMatches(combined);
+
+      } catch (e) {
+        console.warn("Search failed", e);
+      }
+    }, 300); // 300ms debounce
 
     return () => clearTimeout(searchTimeout);
   }, [query, me?.latitude, me?.longitude]);

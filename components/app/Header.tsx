@@ -2,16 +2,17 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { Platform, Pressable, Text, View } from "react-native";
 
-// Minimalist Text Title instead of an Image Logo
+// Minimalist Text Title
 export function MinimalistTitle() {
   return (
-    <View style={{ marginLeft: Platform.OS === "ios" ? 0 : 16 }}>
+    // Standardize the margin for both platforms
+    <View style={{ marginLeft: 16 }}> 
       <Text
         style={{
-          fontSize: 24,
-          fontWeight: "800",
-          color: "#1A1A1A",
-          letterSpacing: -1.2, // Tight tracking for a modern, bold look
+          fontSize: 26, // Slightly larger to match the bold "HopIn." vibe
+          fontWeight: "900", // "Black" weight for maximum impact
+          color: "#000000",
+          letterSpacing: -1.5, 
         }}
       >
         HopIn.
@@ -26,33 +27,36 @@ export function AvatarButton() {
   return (
     <Pressable
       onPress={() => router.push("/profile")}
-      hitSlop={15} // Slightly larger hitSlop for better UX
+      hitSlop={15}
       style={({ pressed }) => ({
-        marginRight: 16,
-        opacity: pressed ? 0.7 : 1, // Visual feedback on press
-        // Subtle drop shadow to make it float over the map
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-        elevation: 4,
+        marginRight: 16, // Matches the left margin
+        opacity: pressed ? 0.7 : 1,
       })}
       accessibilityRole="button"
       accessibilityLabel="Open profile"
     >
-      <Image
-        source={require("@/assets/images/avatar.png")}
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: 21, // Perfect circle
-          backgroundColor: "#F3F4F6", // Neutral fallback
-          borderWidth: 2,
-          borderColor: "#FFFFFF", // Clean white ring around the avatar
-        }}
-        contentFit="cover"
-        transition={200} // Smooth fade-in
-      />
+      <View style={{
+        // Using a View wrapper for shadow to keep the Image border clean
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+      }}>
+        <Image
+          source={require("@/assets/images/avatar.png")}
+          style={{
+            width: 38, // Slightly smaller to keep the header compact
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: "#F3F4F6",
+            borderWidth: 1, // Thinner border looks more "pro" on white
+            borderColor: "#EFEFEF",
+          }}
+          contentFit="cover"
+          transition={200}
+        />
+      </View>
     </Pressable>
   );
 }

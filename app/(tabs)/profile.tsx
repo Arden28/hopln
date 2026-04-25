@@ -3,7 +3,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 const BLACK = "#000";
 const ORANGE = "#FF6F00";
@@ -52,21 +52,6 @@ export default function Profile() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {/* Top bar (flat) */}
-      <View style={styles.topbar}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="chevron-back" size={22} color={BLACK} />
-          <ThemedText style={styles.backText}>Back</ThemedText>
-        </Pressable>
-        <ThemedText style={styles.topbarTitle}>Profile</ThemedText>
-        <View style={{ width: 44 }} />
-        {/* spacer to balance back area */}
-      </View>
 
       {/* Header */}
       <View style={styles.header}>
@@ -194,7 +179,7 @@ export default function Profile() {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
-    paddingTop: 14,
+    paddingTop: Platform.OS === "ios" ? 55 : 20,
     gap: 24,
     backgroundColor: "#F6F7F8", // neutral, not white
   },

@@ -1,3 +1,4 @@
+// search/index.ts
 import { sampleStops } from "@/data/fakeData";
 import Fuse from "fuse.js";
 
