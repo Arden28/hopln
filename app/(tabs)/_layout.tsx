@@ -1,109 +1,420 @@
-import { AvatarButton, MinimalistTitle } from "@/components/app/Header";
-import { HapticTab } from "@/components/haptic-tab";
-import TabBarBackground from "@/components/ui/TabBarBackground";
-import { Ionicons, Feather } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
-import React from "react";
-import { Platform } from "react-native";
+// app/(tabs)/_layout.tsx
+import { Ionicons } from "@expo/vector-icons";
+import { Tabs, useRouter } from "expo-router";
+import React, { useRef, useState, useEffect } from "react";
+import {
+  Animated,
+  Dimensions,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  Platform,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Profile from "./profile";
+import FavoriteScreen from "./favorite";
+import ContributeScreen from "./contribution";
 
-// Context-specific colors
-const ORANGE = "#FF6F00"; 
-const INACTIVE_BLACK = "#1A1A1A"; // Changed from Grey to Dark for higher contrast
+const ORANGE = "#FF6F00";
+const BLACK = "#000000";
+const INACTIVE_BLACK = "#1A1A1A"; 
+const WHITE = "#FFFFFF";
+const { height: SCREEN_H } = Dimensions.get("window");
 
-export default function TabsLayout() {
+// ─── Tab Config ───────────────────────────────────────────────────────────────
+
+type TabId = "explore" | "you" | "contribute" | "profile";
+
+const TABS: {
+  id: TabId;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  iconActive: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { id: "explore",    label: "Explore",    icon: "map-outline",           iconActive: "map"            },
+  { id: "you",        label: "You",        icon: "bookmark-outline",      iconActive: "bookmark"       },
+  { id: "contribute", label: "Contribute", icon: "add-circle-outline",    iconActive: "add-circle"     },
+  { id: "profile",    label: "Profile",    icon: "person-circle-outline", iconActive: "person-circle"  },
+];
+
+// ─── Draggable Bottom Sheet ───────────────────────────────────────────────────
+
+function DraggableSheet({
+  visible,
+  onClose,
+  snapFraction = 0.62,
+  minHeightOffset = 240, // Dynamic limit so Title & Subtitle peek above the tab bar
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  snapFraction?: number;
+  minHeightOffset?: number;
+  children: React.ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  
+  // 3-Step Snapping Points
+  const SNAP_Y  = SCREEN_H * (1 - snapFraction); // Half open
+  const FULL_Y  = SCREEN_H * 0.08;               // Fully expanded
+  const MIN_Y   = SCREEN_H - minHeightOffset;    // Minimized (peeking limit)
+
+  const translateY      = useRef(new Animated.Value(SCREEN_H)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const currentY        = useRef(SNAP_Y);
+  
+  // Track minimized state to disable backdrop pointer events so users can tap the map
+  const [isMinimized, setIsMinimized] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setIsMinimized(false);
+      currentY.current = SNAP_Y;
+      Animated.parallel([
+        Animated.spring(translateY, {
+          toValue: SNAP_Y,
+          useNativeDriver: true,
+          damping: 26,
+          stiffness: 310,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.spring(translateY, {
+          toValue: SCREEN_H,
+          useNativeDriver: true,
+          damping: 22,
+          stiffness: 240,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) =>
+        Math.abs(gs.dy) > 6 && Math.abs(gs.dy) > Math.abs(gs.dx),
+      onPanResponderMove: (_, gs) => {
+        translateY.setValue(Math.max(FULL_Y, currentY.current + gs.dy));
+      },
+      onPanResponderRelease: (_, gs) => {
+        const destY = currentY.current + gs.dy;
+        let targetY = currentY.current;
+
+        if (gs.vy > 0.7 || gs.dy > 90) {
+          // Flick or big drag down -> go down a step
+          targetY = currentY.current === FULL_Y ? SNAP_Y : MIN_Y;
+        } else if (gs.vy < -0.5 || gs.dy < -80) {
+          // Flick or big drag up -> go up a step
+          targetY = currentY.current === MIN_Y ? SNAP_Y : FULL_Y;
+        } else {
+          // Snap to the closest step
+          const dFull = Math.abs(destY - FULL_Y);
+          const dSnap = Math.abs(destY - SNAP_Y);
+          const dMin  = Math.abs(destY - MIN_Y);
+
+          if (dFull < dSnap && dFull < dMin) targetY = FULL_Y;
+          else if (dSnap < dFull && dSnap < dMin) targetY = SNAP_Y;
+          else targetY = MIN_Y;
+        }
+
+        const minimizing = targetY === MIN_Y;
+        setIsMinimized(minimizing);
+
+        // Animate Sheet AND Backdrop simultaneously 
+        Animated.parallel([
+          Animated.spring(translateY, {
+            toValue: targetY,
+            useNativeDriver: true,
+            damping: 24,
+            stiffness: 280,
+          }),
+          Animated.timing(backdropOpacity, {
+            toValue: minimizing ? 0 : 1, // Fade out backdrop so map is clickable
+            duration: 200,
+            useNativeDriver: true,
+          })
+        ]).start();
+
+        currentY.current = targetY;
+      },
+    })
+  ).current;
+
+  if (!visible) return null;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {/* Dimmed backdrop - pointerEvents toggles based on minification */}
+      <Animated.View
+        pointerEvents={isMinimized ? "none" : "auto"}
+        style={[StyleSheet.absoluteFill, { opacity: backdropOpacity, backgroundColor: "rgba(0,0,0,0.32)" }]}
+      >
+        {/* Tapping the backdrop fully closes the sheet and resets the tab */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      </Animated.View>
+
+      {/* Sheet card */}
+      <Animated.View
+        pointerEvents="auto"
+        style={[styles.sheet, { transform: [{ translateY }] }]}
+      >
+        {/* Drag handle */}
+        <View {...panResponder.panHandlers} style={styles.handleArea}>
+          <View style={styles.handle} />
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          bounces
+          contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        >
+          {children}
+        </ScrollView>
+      </Animated.View>
+    </View>
+  );
+}
+
+// ─── Custom Tab Bar ───────────────────────────────────────────────────────────
+
+function CustomTabBar({
+  activeTab,
+  onTabPress,
+}: {
+  activeTab: TabId;
+  onTabPress: (id: TabId) => void;
+}) {
   const insets = useSafeAreaInsets();
 
   return (
-    <Tabs
-      sceneContainerStyle={{
-        backgroundColor: "#FFFFFF",
-      }}
-      screenOptions={{
-        headerTitle: "",
-        headerLeft: () => <MinimalistTitle />,
-        headerRight: () => <AvatarButton />,
-        headerTransparent: false,
-        headerShadowVisible: false,
-        headerStyle: {
-          backgroundColor: "#FFFFFF",
-          borderBottomWidth: 0.5,
-          borderBottomColor: "#E5E5E5",
-          // Adjusted height slightly for a tighter look
-          height: Platform.OS === "ios" ? 100 : 70, 
-        },
-    
-        headerLeftContainerStyle: { paddingLeft: 0 },
-        headerRightContainerStyle: { paddingRight: 0 },
-
-        // --- TAB BAR STYLING ---
-        tabBarShowLabel: false,
-        tabBarActiveTintColor: ORANGE,
-        tabBarInactiveTintColor: INACTIVE_BLACK, // Apply the new dark color here
-        tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
-        tabBarStyle: {
-          backgroundColor: "#FFFFFF",
-          borderTopWidth: 0, // 0.5
-          borderTopColor: "#E5E5E5",
-          elevation: 0,
-          shadowOpacity: 0,
-          height: Platform.OS === "ios" ? 50 + insets.bottom : 64,
-          paddingBottom: Platform.OS === "ios" ? insets.bottom - 10 : 0, 
-        },
-      }}
+    <View
+      style={[
+        styles.tabBar,
+        {paddingBottom: Platform.OS === "ios" ? insets.bottom - 5 : 0},
+      ]}
     >
-      <Tabs.Screen
-        name="home"
-        options={{
-          tabBarIcon: ({ color, focused }) => (
-            // Feather Home looks great, but we use a slightly larger size when focused
-            <Feather name="home" size={focused ? 26 : 24} color={color} />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="map"
-        options={{
-          headerShown: false,
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? "map" : "map-outline"}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="search"
-        options={{
-          headerShown: false,
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? "search" : "search-outline"}
-              size={26}
-              color={color}
-            />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="profile"
-        options={{
-          headerShown: false,
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? "person-circle" : "person-circle-outline"}
-              size={28}
-              color={color}
-            />
-          ),
-        }}
-      />
-    </Tabs>
+      {TABS.map((tab) => {
+        const isActive = tab.id === activeTab;
+        return (
+          <Pressable
+            key={tab.id}
+            onPress={() => onTabPress(tab.id)}
+            style={styles.tabItem}
+            accessibilityRole="tab"
+            accessibilityLabel={tab.label}
+            accessibilityState={{ selected: isActive }}
+          >
+            <View style={[styles.tabPill, isActive && styles.tabPillActive]}>
+              <Ionicons
+                name={isActive ? tab.iconActive : tab.icon}
+                size={22}
+                color={isActive ? WHITE : "#5F6368"}
+              />
+            </View>
+              {isActive && <Text style={styles.tabLabel}>{tab.label}</Text>}
+            {/* Dot indicator for inactive tabs on smaller screens */}
+            {!isActive && (
+              <Text style={styles.tabInactiveLabel} numberOfLines={1}>
+                {tab.label}
+              </Text>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
+
+
+// ─── Sheet: Contribute ────────────────────────────────────────────────────────
+
+function ContributeContent() {
+  return (
+    <View style={styles.sheetBody}>
+      <Text style={styles.sheetTitle}>Contribute</Text>
+      <Text style={styles.sheetSubtitle}>Help improve Safiri for everyone in Nairobi</Text>
+    </View>
+  );
+}
+
+
+// ─── Root Layout ──────────────────────────────────────────────────────────────
+
+export default function TabsLayout() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<TabId>("explore");
+  const [openSheet, setOpenSheet] = useState<TabId | null>(null);
+
+  const handleTabPress = (id: TabId) => {
+    if (id === "explore") {
+      setOpenSheet(null);
+      setActiveTab("explore");
+      router.push("/(tabs)/map" as any);
+    } else {
+      setActiveTab(id);
+      setOpenSheet(id);
+    }
+  };
+
+  const closeSheet = () => {
+    setOpenSheet(null);
+    setActiveTab("explore");
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+      {/* expo-router screens — native tab bar hidden */}
+      <Tabs
+        initialRouteName="map"
+        screenOptions={{
+          tabBarStyle:  { display: "none" },
+          headerShown:  false,
+        }}
+      >
+        <Tabs.Screen name="map"          />
+        <Tabs.Screen name="contribution" options={{ href: null }} />
+        <Tabs.Screen name="search"       />
+        <Tabs.Screen name="profile"      options={{ href: null }} />
+      </Tabs>
+
+      {/* ── Draggable sheets ── */}
+      <DraggableSheet
+        visible={openSheet === "you"}
+        onClose={closeSheet}
+        snapFraction={0.6}
+        minHeightOffset={230} // Peeking limit
+      >
+        <FavoriteScreen />
+      </DraggableSheet>
+
+      <DraggableSheet
+        visible={openSheet === "contribute"}
+        onClose={closeSheet}
+        snapFraction={0.65}
+        minHeightOffset={230}
+      >
+        <ContributeScreen />
+      </DraggableSheet>
+
+      <DraggableSheet
+        visible={openSheet === "profile"}
+        onClose={closeSheet}
+        snapFraction={0.85}
+        minHeightOffset={230}
+      >
+        <Profile />
+      </DraggableSheet>
+
+      {/* ── Floating tab bar — always on top ── */}
+      <CustomTabBar activeTab={activeTab} onTabPress={handleTabPress} />
+    </View>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  // ── Sheet ────────────────────────────────────────────────────────────────────
+  sheet: {
+    position:            "absolute",
+    left:                0,
+    right:               0,
+    bottom:              0,
+    height:              SCREEN_H,
+    backgroundColor:     WHITE,
+    borderTopLeftRadius:  28,
+    borderTopRightRadius: 28,
+    shadowColor:          "#000",
+    shadowOpacity:        0.18,
+    shadowRadius:         24,
+    shadowOffset:         { width: 0, height: -6 },
+    elevation:            24,
+  },
+  handleArea: {
+    paddingTop:    14,
+    paddingBottom: 10,
+    alignItems:    "center",
+  },
+  handle: {
+    width:        42,
+    height:        4,
+    borderRadius:  2,
+    backgroundColor: "#D1D5DB",
+  },
+
+  // ── Tab Bar ──────────────────────────────────────────────────────────────────
+  tabBar: {
+    flexDirection:   "row",
+    alignItems:      "center",
+    justifyContent:  "space-around",
+    backgroundColor: WHITE,
+    paddingTop:        5,
+    paddingBottom:    10,
+    paddingHorizontal: 6,
+    zIndex:           10,
+  },
+  tabItem: {
+    flex:           1,
+    alignItems:     "center",
+    justifyContent: "center",
+    gap:             2,
+  },
+  tabPill: {
+    flexDirection:   "row",
+    alignItems:      "center",
+    paddingVertical:  8,
+    paddingHorizontal: 14,
+    borderRadius:     100,
+    gap:               7,
+  },
+  tabPillActive: {
+    backgroundColor: ORANGE,
+    elevation:        4,
+  },
+  tabLabel: {
+    color:      INACTIVE_BLACK,
+    fontSize:   11,
+    fontWeight: "600",
+    letterSpacing: 0.1,
+  },
+  tabInactiveLabel: {
+    color:      INACTIVE_BLACK,
+    fontSize:   11,
+    fontWeight: "400",
+    letterSpacing: 0.2,
+    marginTop:  1,
+  },
+
+  // ── Sheet Body & Common ───────────────────────────────────────────────────────
+  sheetBody: {
+    paddingHorizontal: 10,
+    paddingTop:         4,
+  },
+  sheetTitle: {
+    fontSize:   26,
+    fontWeight: "800",
+    color:       BLACK,
+    marginBottom: 4,
+    letterSpacing: -0.4,
+  },
+  sheetSubtitle: {
+    fontSize: 14,
+    color:    "#6B7280",
+    marginBottom: 4,
+  },
+});

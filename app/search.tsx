@@ -22,7 +22,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-
 import {
   getRouteColor,
 } from "@/utils/mapHelpers";
@@ -35,6 +34,7 @@ const COLORS = {
   border: "#E5E5EA",
   primary: "#FF6F00",
   blue: "#007AFF",
+  grey: "#8E8E93",
 };
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
@@ -58,13 +58,12 @@ export default function SearchScreen() {
   const toInputRef = useRef<TextInput>(null);
 
   const activeQuery = focusedField === "from" ? fromQ : toQ;
-  const { matches, recents, pushRecent } = useStopSearch(activeQuery, null);
+  const { matches, recents, pushRecent, isSearching } = useStopSearch(activeQuery, null);
 
   const sheetAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [isFetchingRoutes, setIsFetchingRoutes] = useState(false);
 
-  // Get current GPS location once when screen opens
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -81,7 +80,6 @@ export default function SearchScreen() {
     })();
   }, []);
 
-  // ── THE API HANDOFF ──
   useEffect(() => {
     if (fromLoc && toLoc) {
       Animated.spring(sheetAnim, {
@@ -93,7 +91,6 @@ export default function SearchScreen() {
 
       setIsFetchingRoutes(true);
 
-      // Call the Laravel Backend!
       const fetchRoutes = async () => {
         try {
           const routes = await RouteService.calculateJourney(fromLoc, toLoc);
@@ -128,6 +125,12 @@ export default function SearchScreen() {
       });
     }
 
+    // If searching, show a loader
+    if (isSearching) {
+      rows.push({ _type: "loader", key: "search-loader" });
+      return rows; // Stop rendering other lists while loading
+    }
+
     if (!activeQuery && recents.length > 0) {
       rows.push({ _type: "header", title: "Recent", key: "hdr-recent" });
       for (const r of recents)
@@ -148,7 +151,7 @@ export default function SearchScreen() {
           key: `res-${m.item.id}`,
         });
       }
-    } else if (activeQuery) {
+    } else if (activeQuery && !isSearching) {
       rows.push({
         _type: "header",
         title: "No places found",
@@ -156,7 +159,7 @@ export default function SearchScreen() {
       });
     }
     return rows;
-  }, [activeQuery, matches, recents]);
+  }, [activeQuery, matches, recents, isSearching, focusedField, currentLocation]);
 
   function onSelectLocation(loc: UnifiedLocation) {
     pushRecent(loc);
@@ -192,15 +195,9 @@ export default function SearchScreen() {
   }
 
   const HeaderBar = (
-    <View
-      style={[styles.headerContainer, { paddingTop: Math.max(insets.top, 16) }]}
-    >
+    <View style={[styles.headerContainer, { paddingTop: Math.max(insets.top, 16) }]}>
       <View style={styles.headerRow}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={15}
-          style={styles.backBtn}
-        >
+        <Pressable onPress={() => router.back()} hitSlop={15} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={26} color={COLORS.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Plan Route</Text>
@@ -225,10 +222,7 @@ export default function SearchScreen() {
               onFocus={() => setFocusedField("from")}
               placeholder="Current Location"
               placeholderTextColor={COLORS.blue}
-              style={[
-                styles.input,
-                focusedField === "from" && styles.inputFocused,
-              ]}
+              style={[styles.input, focusedField === "from" && styles.inputFocused]}
               returnKeyType="next"
               onSubmitEditing={() => toInputRef.current?.focus()}
             />
@@ -241,11 +235,7 @@ export default function SearchScreen() {
                 hitSlop={10}
                 style={styles.clearBtn}
               >
-                <Ionicons
-                  name="close-circle"
-                  size={16}
-                  color={COLORS.subtext}
-                />
+                <Ionicons name="close-circle" size={16} color={COLORS.subtext} />
               </Pressable>
             )}
           </View>
@@ -264,10 +254,7 @@ export default function SearchScreen() {
               onFocus={() => setFocusedField("to")}
               placeholder="Where to?"
               placeholderTextColor={COLORS.subtext}
-              style={[
-                styles.input,
-                focusedField === "to" && styles.inputFocused,
-              ]}
+              style={[styles.input, focusedField === "to" && styles.inputFocused]}
               returnKeyType="search"
             />
             {toQ.length > 0 && focusedField === "to" && (
@@ -279,11 +266,7 @@ export default function SearchScreen() {
                 hitSlop={10}
                 style={styles.clearBtn}
               >
-                <Ionicons
-                  name="close-circle"
-                  size={16}
-                  color={COLORS.subtext}
-                />
+                <Ionicons name="close-circle" size={16} color={COLORS.subtext} />
               </Pressable>
             )}
           </View>
@@ -306,6 +289,15 @@ export default function SearchScreen() {
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => {
+          
+          if (item._type === "loader") {
+            return (
+              <View style={{ paddingVertical: 32, alignItems: "center", justifyContent: "center" }}>
+                <ActivityIndicator size="small" color={COLORS.subtext} />
+                <Text style={{ marginTop: 8, color: COLORS.subtext, fontSize: 13 }}>Searching...</Text>
+              </View>
+            );
+          }
 
           if (item._type === "current-location") {
             return (
@@ -340,10 +332,7 @@ export default function SearchScreen() {
           return (
             <Pressable
               onPress={() => onSelectLocation(loc)}
-              style={({ pressed }) => [
-                styles.row,
-                pressed && styles.rowPressed,
-              ]}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             >
               <View style={styles.iconContainer}>
                 <Ionicons name={IconName} size={20} color={COLORS.text} />
@@ -352,35 +341,20 @@ export default function SearchScreen() {
                 {item.nameRanges && item.nameRanges.length > 0 ? (
                   <Highlight
                     text={loc.name}
-                    ranges={item.nameRanges.map((indices: any) => ({
-                      indices,
-                    }))}
-                    
+                    ranges={item.nameRanges.map((indices: any) => ({ indices }))}
                   />
                 ) : (
-                  <Text style={styles.rowText} numberOfLines={1}>
-                    {loc.name}
-                  </Text>
+                  <Text style={styles.rowText} numberOfLines={1}>{loc.name}</Text>
                 )}
                 {loc._type === "location" && (
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      color: COLORS.subtext,
-                      marginTop: 2,
-                    }}
-                  >
+                  <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }}>
                     Mapbox Address
                   </Text>
                 )}
 
-                {/* ── Badge Design for Serving Lines ── */}
                 {loc._type === "stop" && loc.route_nams && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                    <Text style={{ fontSize: 12, color: COLORS.subtext, marginRight: 6, fontWeight: "500" }}>
-                      Serves
-                    </Text>
-                    {/* Horizontal scroll prevents the row from getting too tall if there are 10+ lines */}
+                    <Text style={{ fontSize: 12, color: COLORS.subtext, marginRight: 6, fontWeight: "500" }}>Serves</Text>
                     <ScrollView 
                       horizontal 
                       showsHorizontalScrollIndicator={false} 
@@ -389,28 +363,21 @@ export default function SearchScreen() {
                     >
                       {loc.route_nams.split(',').map((routeName, index) => {
                         const cleanName = routeName.trim();
-                        const badgeColor = getRouteColor(cleanName); // <-- Grab the dynamic color!
-
+                        const badgeColor = getRouteColor(cleanName);
                         return (
                           <View
                             key={index}
                             style={{
-                              backgroundColor: `${badgeColor}15`, // 15% opacity of the line color
+                              backgroundColor: `${badgeColor}15`,
                               paddingHorizontal: 6,
                               paddingVertical: 2,
                               borderRadius: 6,
                               marginRight: 6,
                               borderWidth: StyleSheet.hairlineWidth,
-                              borderColor: `${badgeColor}30`, // 30% opacity for the border
+                              borderColor: `${badgeColor}30`,
                             }}
                           >
-                            <Text
-                              style={{
-                                fontSize: 11,
-                                fontWeight: "700",
-                                color: badgeColor, // Full opacity for the text
-                              }}
-                            >
+                            <Text style={{ fontSize: 11, fontWeight: "700", color: badgeColor }}>
                               {cleanName}
                             </Text>
                           </View>
@@ -419,7 +386,6 @@ export default function SearchScreen() {
                     </ScrollView>
                   </View>
                 )}
-
               </View>
             </Pressable>
           );
@@ -450,9 +416,9 @@ export default function SearchScreen() {
         ) : availableRoutes.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="bus-outline" size={48} color={COLORS.border} />
-            <Text style={styles.emptyStateText}>No direct lines found.</Text>
+            <Text style={styles.emptyStateText}>No transit available.</Text>
             <Text style={styles.emptyStateSubtext}>
-              Try adjusting your origin or destination.
+              Buses might not be running right now, or the location is too far.
             </Text>
           </View>
         ) : (
@@ -462,10 +428,15 @@ export default function SearchScreen() {
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
             renderItem={({ item: route }) => {
               
-              // Build a dynamic title based on the segments ──
-              const title = route.type === 'transfer' && route.segments.length > 1
-                ? `Line ${route.segments[0]?.route_name} ➔ ${route.segments[1]?.route_name}`
-                : `Line ${route.segments[0]?.route_name}`;
+              // Safely extract ONLY the transit segments to build the title
+              const transitSegments = route.segments.filter(s => s.mode === 'BUS' || s.mode === 'TRAM');
+              
+              let title = "Walk Only";
+              if (transitSegments.length === 1) {
+                title = `Line ${transitSegments[0].route_name}`;
+              } else if (transitSegments.length > 1) {
+                title = `Line ${transitSegments[0].route_name} ➔ ${transitSegments[1].route_name}`;
+              }
 
               return (
                 <Pressable
@@ -478,42 +449,27 @@ export default function SearchScreen() {
                   <View
                     style={[
                       styles.iconContainer,
-                      { backgroundColor: route.type === 'transfer' ? COLORS.blue : COLORS.primary },
+                      { backgroundColor: route.type === 'transfer' ? COLORS.blue : (transitSegments.length > 0 ? COLORS.primary : COLORS.grey) },
                     ]}
                   >
                     <Ionicons 
-                      name={route.type === 'transfer' ? "git-network-outline" : "bus"} 
+                      name={route.type === 'transfer' ? "git-network-outline" : (transitSegments.length > 0 ? "bus" : "walk")} 
                       size={20} 
                       color="#FFFFFF" 
                     />
                   </View>
                   <View style={styles.rowContent}>
                     
-                    {/* Display the dynamic line numbers here */}
-                    <Text
-                      style={[styles.rowText, { fontWeight: "700" }]}
-                      numberOfLines={1}
-                    >
+                    <Text style={[styles.rowText, { fontWeight: "700" }]} numberOfLines={1}>
                       {title}
                     </Text>
                     
-                    {/* Keep the summary text underneath for extra context */}
-                    <Text
-                      style={{
-                        color: COLORS.subtext,
-                        fontSize: 13,
-                        marginTop: 2,
-                      }}
-                    >
+                    <Text style={{ color: COLORS.subtext, fontSize: 13, marginTop: 2 }}>
                       {route.summary}
                     </Text>
                     
                   </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={COLORS.border}
-                  />
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.border} />
                 </Pressable>
               );
             }}

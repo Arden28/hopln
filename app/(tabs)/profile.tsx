@@ -50,7 +50,7 @@ export default function Profile() {
   const router = useRouter();
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.sheetBody}>
       {/* Top bar (flat) */}
 
       {/* Header */}
@@ -177,6 +177,10 @@ export default function Profile() {
 }
 
 const styles = StyleSheet.create({
+  sheetBody: {
+    paddingHorizontal: 10,
+    paddingTop:         4,
+  },
   container: {
     padding: 20,
     paddingTop: Platform.OS === "ios" ? 55 : 20,

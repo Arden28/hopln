@@ -7,10 +7,13 @@ import {
     stepIcon,
 } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
-import { JSX } from "react";
+import React, { JSX } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+const ORANGE = "#FF6F00";
 const BLACK = "#000000";
+const GREY = "#8E8E93";
+const LIGHT_GREY = "#E5E5EA";
 
 interface RouteStepsListProps {
   steps: Step[];
@@ -40,23 +43,13 @@ export default function RouteStepsList({
         style={styles.stepsHeader}
         accessibilityRole="button"
       >
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            flex: 1,
-          }}
-        >
+        <View style={styles.headerLeft}>
           <Ionicons name="list-outline" size={18} color={BLACK} />
-          <Text style={{ color: BLACK, fontWeight: "600" }}>
+          <Text style={styles.headerTitle}>
             Steps ({steps.length})
           </Text>
           {!stepsOpen && nextPreview && (
-            <Text
-              numberOfLines={1}
-              style={{ color: "#6B7280", marginLeft: 8, flexShrink: 1 }}
-            >
+            <Text numberOfLines={1} style={styles.previewText}>
               {nextPreview}
             </Text>
           )}
@@ -69,53 +62,65 @@ export default function RouteStepsList({
       </Pressable>
 
       {stepsOpen && (
-        <View style={{ gap: 6 }}>
+        <View style={styles.stepsContainer}>
           {steps.map((st, i) => {
             const isLast = i === steps.length - 1;
-            const text = humanizeStep(st, i, isLast, selectedName);
+            const text = humanizeStep(st); // simplified call based on our mapHelpers update
             const active = i === nextStepIdx && navigating;
+            const isPassed = navigating && i < nextStepIdx;
+
             return (
               <View
                 key={i}
                 style={[
                   styles.stepRow,
-                  active && { backgroundColor: "#FFF", borderRadius: 8 },
+                  isPassed && { opacity: 0.4 }
                 ]}
               >
-                <Ionicons
-                  name={stepIcon(st.type, st.modifier)}
-                  size={18}
-                  color={BLACK}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: BLACK }}>
-                    <Text style={{ fontWeight: "700" }}>
-                      {i === 0 ? "From your location: " : ""}
-                    </Text>
+                {/* ICON COLUMN */}
+                <View style={styles.iconCol}>
+                  <View style={[styles.iconBox, active && { backgroundColor: ORANGE }]}>
+                    <Ionicons
+                      name={stepIcon(st.type)}
+                      size={18}
+                      color={active ? "#FFFFFF" : BLACK}
+                    />
+                  </View>
+                  {!isLast && <View style={styles.line} />}
+                </View>
+
+                {/* CONTENT COLUMN */}
+                <View style={styles.contentCol}>
+                  <Text style={[styles.instructionText, active && { color: ORANGE, fontWeight: "700" }]}>
                     {text}
                   </Text>
-                  <Text style={{ color: "#6B7280", marginTop: 2 }}>
-                    {mToNice(st.distance)}{" "}
-                    {st.duration ? `• ${sToMin(st.duration)}` : ""}
-                  </Text>
+                  
+                  {(st.distance > 0 || st.duration > 0) && (
+                    <Text style={styles.metricsText}>
+                      {mToNice(st.distance)} {st.duration ? `• ${sToMin(st.duration)}` : ""}
+                    </Text>
+                  )}
+
+                  {/* TURN-BY-TURN SUB-STEPS FOR WALKING */}
+                  {st.subSteps && st.subSteps.length > 0 && !isPassed && (
+                    <View style={styles.subStepsContainer}>
+                      {st.subSteps.map((sub: any, j: number) => (
+                        <View key={j} style={styles.subStepRow}>
+                          <Ionicons name="arrow-forward" size={14} color={GREY} style={{ marginRight: 8, marginTop: 2 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.subStepInstruction}>{sub.instruction}</Text>
+                            {sub.distance > 0 && (
+                              <Text style={styles.subStepDistance}>{mToNice(sub.distance)}</Text>
+                            )}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               </View>
             );
           })}
-          {steps[steps.length - 1]?.type === "arrive" && (
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-            >
-              <Ionicons name="location-outline" size={16} color={BLACK} />
-              <Text style={styles.sub}>
-                At the destination, the stage is likely on your{" "}
-                <Text style={{ fontWeight: "600", color: BLACK }}>
-                  {steps[steps.length - 1]?.modifier ?? "side"}
-                </Text>
-                .
-              </Text>
-            </View>
-          )}
         </View>
       )}
     </View>
@@ -128,19 +133,85 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#FFFFFF",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: LIGHT_GREY,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  headerTitle: { color: BLACK, fontWeight: "600", fontSize: 15 },
+  previewText: { color: GREY, marginLeft: 8, flexShrink: 1, fontSize: 14 },
+  stepsContainer: {
+    marginTop: 8,
+    paddingHorizontal: 8,
   },
   stepRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#EEE",
+    minHeight: 60,
   },
-  sub: { color: "#6B7280", textAlign: "left" },
+  iconCol: {
+    width: 32,
+    alignItems: "center",
+    marginRight: 16,
+  },
+  iconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F2F2F7",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2,
+  },
+  line: {
+    width: 2,
+    flex: 1,
+    backgroundColor: LIGHT_GREY,
+    marginTop: -4,
+    marginBottom: -4,
+  },
+  contentCol: {
+    flex: 1,
+    paddingTop: 6,
+    paddingBottom: 24,
+  },
+  instructionText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: BLACK,
+  },
+  metricsText: {
+    fontSize: 14,
+    color: GREY,
+    marginTop: 4,
+  },
+  subStepsContainer: {
+    marginTop: 12,
+    backgroundColor: "#F9FAFB",
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#F3F4F6",
+  },
+  subStepRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 10,
+  },
+  subStepInstruction: {
+    fontSize: 14,
+    color: "#374151",
+    fontWeight: "500",
+  },
+  subStepDistance: {
+    fontSize: 12,
+    color: GREY,
+    marginTop: 2,
+  }
 });

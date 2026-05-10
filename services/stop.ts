@@ -42,7 +42,7 @@ export const StopService = {
       `/stops/search?q=${encodeURIComponent(query)}`,
     );
 
-    // console.log("Search Stops Result:", data.data);
+    console.log("Search Stops Result:", data.data);
     return data.data;
   },
 };

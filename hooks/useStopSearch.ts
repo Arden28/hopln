@@ -29,24 +29,10 @@ const SafeStorage =
     },
   } as Pick<typeof Storage, "getItem" | "setItem" | "removeItem">);
 
-function dMeters(a: Coords, b: Coords) {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const R = 6371e3;
-  const dLat = toRad(b.latitude - a.latitude);
-  const dLon = toRad(b.longitude - a.longitude);
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.latitude)) *
-      Math.cos(toRad(b.latitude)) *
-      Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-}
-
 export function useStopSearch(query: string, me: Coords | null) {
   const [recents, setRecents] = useState<UnifiedLocation[]>([]);
-  const [matches, setMatches] = useState<
-    { item: UnifiedLocation; blended: number }[]
-  >([]);
+  const [matches, setMatches] = useState<{ item: UnifiedLocation; blended: number }[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Load Recents
   useEffect(() => {
@@ -63,8 +49,11 @@ export function useStopSearch(query: string, me: Coords | null) {
     const q = query.trim();
     if (q.length < 2) {
       setMatches([]);
+      setIsSearching(false);
       return;
     }
+
+    setIsSearching(true); // Start loading when typing passes 2 chars
 
     const searchTimeout = setTimeout(async () => {
       try {
@@ -80,13 +69,10 @@ export function useStopSearch(query: string, me: Coords | null) {
             lng: s.lng,
             route_nams: s.route_nams,
           },
-          // Assign a fake high score so these always stay at the top
           blended: 1.0 - (idx * 0.01), 
         }));
 
         // 2. FALLBACK TO MAPBOX IF NEEDED
-        // If your database found less than 3 stages, the user is probably 
-        // looking for a specific address or building. Call Mapbox!
         let remoteMatches: any[] = [];
         if (localMatches.length < 3) {
           const proxParam = me ? `&proximity=${me.longitude},${me.latitude}` : "";
@@ -104,7 +90,6 @@ export function useStopSearch(query: string, me: Coords | null) {
                 lat: f.center[1],
                 lng: f.center[0],
               },
-              // Mapbox results get a slightly lower score so they sit below Matatu stages
               blended: 0.8 - (idx * 0.05),
             }));
           }
@@ -118,10 +103,14 @@ export function useStopSearch(query: string, me: Coords | null) {
 
       } catch (e) {
         console.warn("Search failed", e);
+      } finally {
+        setIsSearching(false); // Stop loading regardless of success/fail
       }
     }, 300); // 300ms debounce
 
-    return () => clearTimeout(searchTimeout);
+    return () => {
+      clearTimeout(searchTimeout);
+    };
   }, [query, me?.latitude, me?.longitude]);
 
   const pushRecent = async (s: UnifiedLocation) => {
@@ -132,5 +121,5 @@ export function useStopSearch(query: string, me: Coords | null) {
     } catch {}
   };
 
-  return { recents, matches, pushRecent };
+  return { recents, matches, pushRecent, isSearching };
 }

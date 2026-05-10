@@ -13,7 +13,7 @@ export type Stop = {
   name: string;
   lat: number;
   lng: number;
-  dist?: number; // Optional, useful for nearest sorting
+  dist?: number; 
 };
 
 export type RouteInfo = {
@@ -28,9 +28,7 @@ export type Step = {
   duration: number;
   location: [number, number];
   type?: string;
-  modifier?: string;
-  bearing_after?: number;
-  exit?: number;
+  subSteps?: any[]; 
 };
 
 export function dMeters(
@@ -88,22 +86,6 @@ export function bboxFromCoords(
   return [minLng, minLat, maxLng, maxLat];
 }
 
-export function bearingToCardinal(bearing?: number) {
-  if (bearing == null || isNaN(bearing)) return "forward";
-  const dirs = [
-    "north",
-    "northeast",
-    "east",
-    "southeast",
-    "south",
-    "southwest",
-    "west",
-    "northwest",
-  ];
-  const idx = Math.round(bearing / 45) % 8;
-  return dirs[idx];
-}
-
 export function mToNice(m: number) {
   return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
 }
@@ -114,120 +96,38 @@ export function sToMin(s: number) {
   return min <= 1 ? "~1 min" : `~${min} min`;
 }
 
-export function ordinalSuffix(n: number) {
-  const j = n % 10,
-    k = n % 100;
-  if (j === 1 && k !== 11) return "st";
-  if (j === 2 && k !== 12) return "nd";
-  if (j === 3 && k !== 13) return "rd";
-  return "th";
-}
-
-export function humanizeStep(
-  st: Step,
-  i: number,
-  last: boolean,
-  stopName: string,
-) {
-  if (st.type === "arrive") {
-    const side = st.modifier ? ` on your ${st.modifier}` : "";
-    return `Arrive at ${stopName}${side}.`;
-  }
+export function humanizeStep(st: Step) {
+  // We've pre-formatted the instructions beautifully in map.tsx, 
+  // so we just return them directly!
   if (st.instruction) return st.instruction;
-  const road = st.name ? ` onto ${st.name}` : "";
-  const dir = bearingToCardinal(st.bearing_after);
-  switch (st.type) {
-    case "depart":
-    case "start":
-      return `Head ${dir}${st.name ? ` on ${st.name}` : ""}.`;
-    case "turn":
-      if (
-        st.modifier === "left" ||
-        st.modifier === "slight left" ||
-        st.modifier === "sharp left"
-      )
-        return `Turn left${road}.`;
-      if (
-        st.modifier === "right" ||
-        st.modifier === "slight right" ||
-        st.modifier === "sharp right"
-      )
-        return `Turn right${road}.`;
-      if (st.modifier === "uturn") return `Make a U-turn${road}.`;
-      return `Continue straight${road}.`;
-    case "new name":
-      return `Continue on ${st.name ?? "the path"}.`;
-    case "roundabout":
-      return st.exit
-        ? `At the roundabout, take the ${st.exit}${ordinalSuffix(
-            st.exit,
-          )} exit${road}.`
-        : `At the roundabout, continue${road}.`;
-    default:
-      return `Continue${road}.`;
-  }
+  return `Continue`;
 }
 
-export function stepIcon(
-  t?: string,
-  m?: string,
-): keyof typeof Ionicons.glyphMap {
+export function stepIcon(t?: string): keyof typeof Ionicons.glyphMap {
   if (t === "arrive") return "location-outline";
-  if (t === "depart" || t === "start") return "navigate-outline";
-  if (t === "roundabout") return "sync-outline";
-  if (t === "turn") {
-    if (m === "left" || m === "slight left" || m === "sharp left")
-      return "arrow-undo-outline";
-    if (m === "right" || m === "slight right" || m === "sharp right")
-      return "arrow-redo-outline";
-    if (m === "uturn") return "refresh-outline";
-    return "arrow-up-outline";
-  }
-  if (t === "new name") return "compass-outline";
-  return "walk-outline";
+  if (t === "depart") return "bus-outline";
+  if (t === "walk") return "walk-outline";
+  return "ellipse-outline";
 }
-
-const TRANSIT_COLORS = [
-  "#FF6F00", // Hopln Orange
-  "#007AFF", // iOS Blue
-  "#34C759", // Green
-  "#AF52DE", // Purple
-  "#FF2D55", // Pink
-  "#5AC8FA", // Light Blue
-  "#FF9500", // Amber
-];
-
 
 /**
  * Generates a consistent, highly distinct, and vibrant HEX color from a route name.
- * Provides 360 distinct colors to prevent transfer collisions.
  */
 export function getRouteColor(routeName: string): string {
-  if (!routeName) return "#FF6F00"; // Mova Orange fallback
-
-  // 1. Generate a deterministic hash from the string
+  if (!routeName) return "#FF6F00"; 
   let hash = 0;
   for (let i = 0; i < routeName.length; i++) {
     hash = routeName.charCodeAt(i) + ((hash << 5) - hash);
   }
-
-  // 2. Map the hash to a Hue (0 to 360 degrees on the color wheel)
   const h = Math.abs(hash) % 360;
-  
-  // 3. Set Saturation to 85% (vibrant) and Lightness to 45% (readable on maps)
   const s = 85; 
   const l = 45; 
-
-  // 4. Convert HSL to strict 6-character HEX
   const lNorm = l / 100;
   const a = (s * Math.min(lNorm, 1 - lNorm)) / 100;
-  
   const f = (n: number) => {
     const k = (n + h / 30) % 12;
     const color = lNorm - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    // Convert to hex and pad with zeros
     return Math.round(255 * color).toString(16).padStart(2, '0');
   };
-
   return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
