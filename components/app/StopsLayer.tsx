@@ -1,42 +1,55 @@
-import MapboxGL from "@rnmapbox/maps";
-import type { FeatureCollection, Point } from "geojson";
 import React, { useMemo } from "react";
+import { Image, StyleSheet, Text, View } from "react-native";
+// Text is kept for ClusterBubble count label
+import { Marker } from "react-native-maps";
 
-type Stop = { id: string; name: string; lat: number; lng: number };
+type Stop = { id: string; name: string; lat: number; lng: number; route_nams?: string | null };
 
-const STOPS_MIN_ZOOM = 13.0;
-const STOPS_LIMIT = 400;
+interface Cluster {
+  id: string;
+  lat: number;
+  lng: number;
+  count: number;
+  stop: Stop | null; // non-null only when count === 1
+}
 
-function radiusForZoom(zoom: number) {
+const ORANGE          = "#FF6F00";
+const CLUSTER_COLORS  = ["#FF9F43", "#FF6F00", "#C0392B"] as const; // sm / md / lg
+const STOPS_MIN_ZOOM  = 13.0;
+
+// Grid cell size in degrees per zoom band.
+// Cells smaller → more individual markers visible; larger → more aggressive clustering.
+function cellDeg(zoom: number): number {
+  if (zoom >= 16) return 0;       // individual markers, no clustering
+  if (zoom >= 15) return 0.002;   // ≈ 220 m
+  if (zoom >= 14) return 0.004;   // ≈ 440 m
+  return 0.008;                   // ≈ 880 m  (zoom 13–14)
+}
+
+// Viewport radius used to pre-filter before clustering (keeps useMemo fast).
+function radiusForZoom(zoom: number): number {
   if (zoom < 13) return 0;
-  if (zoom < 14) return 1800;
-  if (zoom < 15) return 1100;
-  if (zoom < 16) return 700;
-  if (zoom < 17) return 450;
-  return 320;
+  if (zoom < 14) return 2000;
+  if (zoom < 15) return 1400;
+  if (zoom < 16) return 900;
+  if (zoom < 17) return 550;
+  return 380;
 }
 
 function dMeters(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number },
-) {
+  aLat: number, aLng: number,
+  bLat: number, bLng: number,
+): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
-  const R = 6371e3;
-  const dLat = toRad(b.latitude - a.latitude);
-  const dLon = toRad(b.longitude - a.longitude);
-  const la1 = toRad(a.latitude);
-  const la2 = toRad(b.latitude);
+  const R     = 6371e3;
+  const dLat  = toRad(bLat - aLat);
+  const dLon  = toRad(bLng - aLng);
+  const la1   = toRad(aLat);
+  const la2   = toRad(bLat);
   const x =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-}
-
-function degBoxForRadiusMeters(lat: number, rMeters: number) {
-  const dLat = rMeters / 111320;
-  const dLon =
-    rMeters / (111320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
-  return { dLat, dLon };
 }
 
 type Props = {
@@ -44,7 +57,7 @@ type Props = {
   viewCenter: { lat: number; lng: number } | null;
   viewZoom: number;
   selected?: Stop | null;
-  onPress: (e: any) => void;
+  onPress: (stop: Stop) => void;
 };
 
 export default function StopsLayer({
@@ -54,146 +67,196 @@ export default function StopsLayer({
   selected,
   onPress,
 }: Props) {
-  const filtered: Stop[] = useMemo(() => {
-    if (!viewCenter || viewZoom < STOPS_MIN_ZOOM) return [];
-    const r = radiusForZoom(viewZoom);
-    if (r <= 0) return [];
 
-    const { dLat, dLon } = degBoxForRadiusMeters(viewCenter.lat, r);
+  const { clusters, selectedStop } = useMemo(() => {
+    if (!viewCenter || viewZoom < STOPS_MIN_ZOOM) {
+      return { clusters: [], selectedStop: selected ?? null };
+    }
+
+    const r = radiusForZoom(viewZoom);
+    if (r <= 0) return { clusters: [], selectedStop: selected ?? null };
+
+    // 1. Bounding-box pre-filter (fast, no sqrt)
+    const dLat = r / 111320;
+    const dLon = r / (111320 * Math.max(0.2, Math.cos((viewCenter.lat * Math.PI) / 180)));
     const minLat = viewCenter.lat - dLat;
     const maxLat = viewCenter.lat + dLat;
     const minLng = viewCenter.lng - dLon;
     const maxLng = viewCenter.lng + dLon;
 
-    const boxed = allStops.filter(
+    // Exclude the selected stop — it always gets its own marker below
+    const selId = selected?.id ?? null;
+
+    const inBounds = allStops.filter(
       (s) =>
-        s.lat >= minLat &&
-        s.lat <= maxLat &&
-        s.lng >= minLng &&
-        s.lng <= maxLng,
+        s.id !== selId &&
+        s.lat >= minLat && s.lat <= maxLat &&
+        s.lng >= minLng && s.lng <= maxLng,
     );
 
-    const within = boxed
-      .map((s) => ({
-        s,
-        d: dMeters(
-          { latitude: viewCenter.lat, longitude: viewCenter.lng },
-          { latitude: s.lat, longitude: s.lng },
-        ),
-      }))
-      .filter((x) => x.d <= r)
-      .sort((a, b) => a.d - b.d)
-      .slice(0, STOPS_LIMIT)
-      .map((x) => x.s);
+    // 2. Circle filter
+    const nearby = inBounds.filter(
+      (s) => dMeters(viewCenter.lat, viewCenter.lng, s.lat, s.lng) <= r,
+    );
 
-    if (selected && !within.some((w) => w.id === selected.id)) {
-      within.push(selected);
+    // 3. Grid clustering
+    const cs = cellDeg(viewZoom);
+
+    if (cs === 0) {
+      // No clustering — render individual markers (capped to avoid overload)
+      const capped = nearby.slice(0, 500);
+      return {
+        clusters: capped.map<Cluster>((s) => ({
+          id: s.id, lat: s.lat, lng: s.lng, count: 1, stop: s,
+        })),
+        selectedStop: selected ?? null,
+      };
     }
-    return within;
+
+    const cells = new Map<string, Stop[]>();
+    for (const s of nearby) {
+      const key = `${Math.floor(s.lat / cs)},${Math.floor(s.lng / cs)}`;
+      const arr = cells.get(key);
+      if (arr) arr.push(s);
+      else cells.set(key, [s]);
+    }
+
+    const result: Cluster[] = [];
+    for (const [key, group] of cells) {
+      const lat = group.reduce((sum, s) => sum + s.lat, 0) / group.length;
+      const lng = group.reduce((sum, s) => sum + s.lng, 0) / group.length;
+      result.push({
+        id:    group.length === 1 ? group[0].id : `cluster-${key}`,
+        lat,
+        lng,
+        count: group.length,
+        stop:  group.length === 1 ? group[0] : null,
+      });
+    }
+
+    return { clusters: result, selectedStop: selected ?? null };
   }, [allStops, viewCenter?.lat, viewCenter?.lng, viewZoom, selected?.id]);
-
-  const idsKey = useMemo(
-    () =>
-      filtered
-        .map((s) => s.id)
-        .sort()
-        .join("|"),
-    [filtered],
-  );
-
-  const stopsFC: FeatureCollection<Point> = useMemo(
-    () => ({
-      type: "FeatureCollection",
-      features: filtered.map((s) => ({
-        type: "Feature",
-        id: s.id,
-        properties: { id: s.id, name: s.name },
-        geometry: { type: "Point", coordinates: [Number(s.lng), Number(s.lat)] }, 
-      })),
-    }),
-    [idsKey], 
-  );
-
-  const selectedFC: FeatureCollection<Point> | null = useMemo(() => {
-    if (!selected) return null;
-    return {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          id: `selected-${selected.id}`,
-          properties: { id: selected.id, name: selected.name, selected: true },
-          geometry: {
-            type: "Point",
-            coordinates: [Number(selected.lng), Number(selected.lat)],
-          },
-        },
-      ],
-    };
-  }, [selected?.id]);
 
   return (
     <>
-      <MapboxGL.ShapeSource
-        id="stops"
-        shape={stopsFC}
-        tolerance={1}
-        onPress={onPress}
-        hitbox={{ width: 44, height: 44 }}
-      >
-        <MapboxGL.SymbolLayer
-          id="stops-symbol"
-          minZoomLevel={STOPS_MIN_ZOOM}
-          style={{
-            iconImage: "matatu-pin",
-            iconSize: 0.03,
-            iconRotate: 0,
-            iconRotationAlignment: "viewport",
-            iconAllowOverlap: true,
-            iconIgnorePlacement: true,
-            iconAnchor: "center",
-            iconOffset: [0, -4],
-            
-            // ── NEW TEXT STYLES ──
-            textField: "{name}", // Pulls the 'name' from GeoJSON properties
-            textSize: 11,
-            textColor: "#333333", // Dark gray for non-selected stops
-            textHaloColor: "#FFFFFF",
-            textHaloWidth: 1.5,
-            textAnchor: "top", // Places text below the pin
-            textOffset: [0, 0.8], // Slight spacing from the pin
-            textAllowOverlap: false, // Hides text if it collides with another stop's text
-            textOptional: true, // If text is hidden, keep the pin visible!
-          }}
-        />
-      </MapboxGL.ShapeSource>
-
-      {!!selectedFC && (
-        <MapboxGL.ShapeSource id="stops-selected" shape={selectedFC}>
-          <MapboxGL.SymbolLayer
-            id="stops-selected-symbol"
-            style={{
-              iconImage: "matatu-pin",
-              iconSize: 0.035, // Slightly bigger when selected
-              iconRotationAlignment: "viewport",
-              iconAllowOverlap: true,
-              iconIgnorePlacement: true,
-              iconAnchor: "center",
-              iconOffset: [0, -4],
-              
-              // ── HIGHLIGHTED TEXT STYLES ──
-              textField: "{name}",
-              textSize: 13,
-              textColor: "#FF6F00", // Mova Orange to make it pop
-              textHaloColor: "#FFFFFF",
-              textHaloWidth: 2,
-              textAnchor: "top",
-              textOffset: [0, 1],
-              textAllowOverlap: true, // Selected text MUST always show
+      {/* Clustered + individual markers */}
+      {clusters.map((c) =>
+        c.count === 1 && c.stop ? (
+          // ── Individual stop ──────────────────────────────────────────────
+          <Marker
+            key={c.id}
+            identifier={c.id}
+            coordinate={{ latitude: c.lat, longitude: c.lng }}
+            onPress={() => onPress(c.stop!)}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <View style={s.pin}>
+              <Image
+                source={require("@/assets/images/matatu.png")}
+                style={s.icon}
+                resizeMode="contain"
+              />
+            </View>
+          </Marker>
+        ) : (
+          // ── Cluster bubble ───────────────────────────────────────────────
+          <Marker
+            key={c.id}
+            coordinate={{ latitude: c.lat, longitude: c.lng }}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 0.5 }}
+            onPress={() => {
+              // Pressing a cluster does nothing (user zooms in naturally)
             }}
-          />
-        </MapboxGL.ShapeSource>
+          >
+            <ClusterBubble count={c.count} />
+          </Marker>
+        ),
+      )}
+
+      {/* Selected stop — always on top, larger icon */}
+      {selectedStop && (
+        <Marker
+          key={`${selectedStop.id}-selected`}
+          identifier={selectedStop.id}
+          coordinate={{ latitude: selectedStop.lat, longitude: selectedStop.lng }}
+          onPress={() => onPress(selectedStop)}
+          tracksViewChanges={false}
+          anchor={{ x: 0.5, y: 1 }}
+          zIndex={99}
+        >
+          <View style={s.pin}>
+            <Image
+              source={require("@/assets/images/matatu.png")}
+              style={s.iconSelected}
+              resizeMode="contain"
+            />
+          </View>
+        </Marker>
       )}
     </>
   );
 }
+
+// ── Cluster bubble ─────────────────────────────────────────────────────────────
+
+function clusterColor(count: number): string {
+  if (count >= 50) return CLUSTER_COLORS[2];
+  if (count >= 10) return CLUSTER_COLORS[1];
+  return CLUSTER_COLORS[0];
+}
+
+function clusterSize(count: number): number {
+  if (count >= 50) return 46;
+  if (count >= 10) return 38;
+  return 30;
+}
+
+function ClusterBubble({ count }: { count: number }) {
+  const size  = clusterSize(count);
+  const color = clusterColor(count);
+  return (
+    <View
+      style={[
+        s.cluster,
+        { width: size, height: size, borderRadius: size / 2, backgroundColor: color },
+      ]}
+    >
+      <Text style={s.clusterText}>{count > 99 ? "99+" : count}</Text>
+    </View>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  pin: {
+    alignItems: "center",
+  },
+  icon: {
+    width: 18,
+    height: 18,
+  },
+  iconSelected: {
+    width: 30,
+    height: 30,
+  },
+  cluster: {
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.6)",
+  },
+  clusterText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 13,
+  },
+});

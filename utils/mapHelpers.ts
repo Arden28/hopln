@@ -13,7 +13,9 @@ export type Stop = {
   name: string;
   lat: number;
   lng: number;
-  dist?: number; 
+  dist?: number;
+  route_nams?: string | null;
+  location_t?: number;
 };
 
 export type RouteInfo = {
@@ -21,14 +23,34 @@ export type RouteInfo = {
   duration: number;
 };
 
+export type Maneuver =
+  | "straight" | "turn-left" | "turn-right"
+  | "slight-left" | "slight-right" | "u-turn" | "start";
+
+export type WalkSubStep = {
+  instruction: string;
+  note?: string;
+  distance: number;
+  duration: number;
+  lat: number;
+  lng: number;
+  maneuver: Maneuver;
+};
+
+export type RouteStop = { name: string; lat: number; lng: number };
+
 export type Step = {
   instruction?: string;
   name?: string;
   distance: number;
   duration: number;
   location: [number, number];
-  type?: string;
-  subSteps?: any[]; 
+  type?: "walk" | "depart" | "arrive" | string;
+  subSteps?: WalkSubStep[];
+  routeName?: string;
+  routeColor?: string;
+  /** Ordered stops for transit depart steps: [boarding, ...intermediate, alighting]. */
+  stops?: RouteStop[];
 };
 
 export function dMeters(
@@ -106,8 +128,30 @@ export function humanizeStep(st: Step) {
 export function stepIcon(t?: string): keyof typeof Ionicons.glyphMap {
   if (t === "arrive") return "location-outline";
   if (t === "depart") return "bus-outline";
-  if (t === "walk") return "walk-outline";
+  if (t === "walk")   return "walk-outline";
   return "ellipse-outline";
+}
+
+export function detectManeuver(instruction: string): Maneuver {
+  const s = instruction.toLowerCase();
+  if (s.includes("u-turn"))                             return "u-turn";
+  if (s.includes("slight left") || s.includes("keep left"))  return "slight-left";
+  if (s.includes("slight right") || s.includes("keep right")) return "slight-right";
+  if (s.includes("turn left")  || s.includes("left"))  return "turn-left";
+  if (s.includes("turn right") || s.includes("right")) return "turn-right";
+  return "straight";
+}
+
+export function maneuverIcon(m: Maneuver): keyof typeof Ionicons.glyphMap {
+  switch (m) {
+    case "turn-left":    return "arrow-back-outline";
+    case "turn-right":   return "arrow-forward-outline";
+    case "slight-left":  return "arrow-back-outline";
+    case "slight-right": return "arrow-forward-outline";
+    case "u-turn":       return "return-down-back-outline";
+    case "start":        return "navigate-outline";
+    default:             return "arrow-up-outline";
+  }
 }
 
 /**

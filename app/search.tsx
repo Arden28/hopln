@@ -2,7 +2,6 @@
 import { useStopSearch } from "@/hooks/useStopSearch";
 import { RouteService,  type Route } from "@/services/route";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
-import { Highlight } from "@/ui/Highlight";
 import * as Location from "expo-location";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -22,6 +21,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { MapService, type PlacePrediction } from "@/services/map";
 import {
   getRouteColor,
 } from "@/utils/mapHelpers";
@@ -58,9 +58,14 @@ export default function SearchScreen() {
   const toInputRef = useRef<TextInput>(null);
 
   const activeQuery = focusedField === "from" ? fromQ : toQ;
-  const { matches, recents, pushRecent, isSearching } = useStopSearch(activeQuery, null);
+  const { stops, places, recents, pushRecent, isSearchingStops, isSearchingPlaces } =
+    useStopSearch(
+      activeQuery,
+      currentLocation ? { latitude: currentLocation.lat, longitude: currentLocation.lng } : null,
+    );
 
   const sheetAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [isFetchingRoutes, setIsFetchingRoutes] = useState(false);
 
@@ -118,17 +123,7 @@ export default function SearchScreen() {
     const rows: any[] = [];
 
     if (focusedField === "from" && currentLocation) {
-      rows.push({
-        _type: "current-location",
-        location: currentLocation,
-        key: "current-location",
-      });
-    }
-
-    // If searching, show a loader
-    if (isSearching) {
-      rows.push({ _type: "loader", key: "search-loader" });
-      return rows; // Stop rendering other lists while loading
+      rows.push({ _type: "current-location", location: currentLocation, key: "current-location" });
     }
 
     if (!activeQuery && recents.length > 0) {
@@ -137,29 +132,37 @@ export default function SearchScreen() {
         rows.push({ _type: "recent", location: r, key: `recent-${r.id}` });
     }
 
-    if (matches.length > 0) {
-      rows.push({
-        _type: "header",
-        title: activeQuery ? "Results" : "Suggestions",
-        key: "hdr-results",
-      });
-      for (const m of matches) {
-        rows.push({
-          _type: "result",
-          location: m.item,
-          nameRanges: [],
-          key: `res-${m.item.id}`,
-        });
+    if (activeQuery) {
+      // Transit Stops section
+      if (stops.length > 0 || isSearchingStops) {
+        rows.push({ _type: "header", title: "Transit Stops", key: "hdr-stops" });
+        if (isSearchingStops) {
+          rows.push({ _type: "stops-loading", key: "stops-loading" });
+        } else {
+          for (const s of stops)
+            rows.push({ _type: "stop-item", location: s, key: `stop-${s.id}` });
+        }
       }
-    } else if (activeQuery && !isSearching) {
-      rows.push({
-        _type: "header",
-        title: "No places found",
-        key: "hdr-empty",
-      });
+
+      // Places section
+      if (places.length > 0 || isSearchingPlaces) {
+        rows.push({ _type: "header", title: "Places", key: "hdr-places" });
+        if (isSearchingPlaces) {
+          rows.push({ _type: "places-loading", key: "places-loading" });
+        } else {
+          for (const p of places)
+            rows.push({ _type: "place-item", place: p, key: `place-${p.place_id}` });
+        }
+      }
+
+      // No results from either source
+      if (!isSearchingStops && !isSearchingPlaces && stops.length === 0 && places.length === 0) {
+        rows.push({ _type: "header", title: "No places found", key: "hdr-empty" });
+      }
     }
+
     return rows;
-  }, [activeQuery, matches, recents, isSearching, focusedField, currentLocation]);
+  }, [activeQuery, stops, places, isSearchingStops, isSearchingPlaces, recents, focusedField, currentLocation]);
 
   function onSelectLocation(loc: UnifiedLocation) {
     pushRecent(loc);
@@ -175,6 +178,20 @@ export default function SearchScreen() {
       setToLoc(loc);
       setToQ(loc.name);
     }
+  }
+
+  async function onSelectPlace(pred: PlacePrediction) {
+    setResolvingPlaceId(pred.place_id);
+    const details = await MapService.getPlaceDetails(pred.place_id);
+    setResolvingPlaceId(null);
+    if (!details) return;
+    onSelectLocation({
+      _type: "location",
+      id:    pred.place_id,
+      name:  pred.main_text,
+      lat:   details.lat,
+      lng:   details.lng,
+    });
   }
 
   function onSelectRoute(route: Route) {
@@ -288,13 +305,14 @@ export default function SearchScreen() {
         keyExtractor={(item) => item.key}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
+        extraData={resolvingPlaceId}
         renderItem={({ item }) => {
-          
-          if (item._type === "loader") {
+
+          if (item._type === "stops-loading" || item._type === "places-loading") {
             return (
-              <View style={{ paddingVertical: 32, alignItems: "center", justifyContent: "center" }}>
+              <View style={{ paddingVertical: 14, paddingLeft: 48, flexDirection: "row", alignItems: "center" }}>
                 <ActivityIndicator size="small" color={COLORS.subtext} />
-                <Text style={{ marginTop: 8, color: COLORS.subtext, fontSize: 13 }}>Searching...</Text>
+                <Text style={{ marginLeft: 10, color: COLORS.subtext, fontSize: 13 }}>Searching…</Text>
               </View>
             );
           }
@@ -309,12 +327,8 @@ export default function SearchScreen() {
                   <Ionicons name="locate" size={20} color="#FFFFFF" />
                 </View>
                 <View style={styles.rowContent}>
-                  <Text style={styles.rowText} numberOfLines={1}>
-                    {item.location.name}
-                  </Text>
-                  <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }}>
-                    Use my current location
-                  </Text>
+                  <Text style={styles.rowText} numberOfLines={1}>{item.location.name}</Text>
+                  <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }}>Use my current location</Text>
                 </View>
               </Pressable>
             );
@@ -324,6 +338,35 @@ export default function SearchScreen() {
             return <Text style={styles.sectionTitle}>{item.title}</Text>;
           }
 
+          // Place result row
+          if (item._type === "place-item") {
+            const pred = item.place as PlacePrediction;
+            const isResolving = resolvingPlaceId === pred.place_id;
+            return (
+              <Pressable
+                onPress={() => onSelectPlace(pred)}
+                disabled={isResolving}
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              >
+                <View style={styles.iconContainer}>
+                  {isResolving
+                    ? <ActivityIndicator size="small" color={COLORS.primary} />
+                    : <Ionicons name="location-outline" size={20} color={COLORS.text} />
+                  }
+                </View>
+                <View style={styles.rowContent}>
+                  <Text style={[styles.rowText, { fontWeight: "600" }]} numberOfLines={1}>{pred.main_text}</Text>
+                  {pred.secondary_text ? (
+                    <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }} numberOfLines={1}>
+                      {pred.secondary_text}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            );
+          }
+
+          // Stop result row or recent row
           const loc = item.location as UnifiedLocation;
           let IconName: any = "location-outline";
           if (item._type === "recent") IconName = "time-outline";
@@ -338,30 +381,17 @@ export default function SearchScreen() {
                 <Ionicons name={IconName} size={20} color={COLORS.text} />
               </View>
               <View style={styles.rowContent}>
-                {item.nameRanges && item.nameRanges.length > 0 ? (
-                  <Highlight
-                    text={loc.name}
-                    ranges={item.nameRanges.map((indices: any) => ({ indices }))}
-                  />
-                ) : (
-                  <Text style={styles.rowText} numberOfLines={1}>{loc.name}</Text>
-                )}
-                {loc._type === "location" && (
-                  <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }}>
-                    Mapbox Address
-                  </Text>
-                )}
-
+                <Text style={styles.rowText} numberOfLines={1}>{loc.name}</Text>
                 {loc._type === "stop" && loc.route_nams && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
                     <Text style={{ fontSize: 12, color: COLORS.subtext, marginRight: 6, fontWeight: "500" }}>Serves</Text>
-                    <ScrollView 
-                      horizontal 
-                      showsHorizontalScrollIndicator={false} 
-                      contentContainerStyle={{ alignItems: 'center' }}
-                      pointerEvents="none" 
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ alignItems: "center" }}
+                      pointerEvents="none"
                     >
-                      {loc.route_nams.split(',').map((routeName, index) => {
+                      {loc.route_nams.split(",").map((routeName, index) => {
                         const cleanName = routeName.trim();
                         const badgeColor = getRouteColor(cleanName);
                         return (
@@ -377,9 +407,7 @@ export default function SearchScreen() {
                               borderColor: `${badgeColor}30`,
                             }}
                           >
-                            <Text style={{ fontSize: 11, fontWeight: "700", color: badgeColor }}>
-                              {cleanName}
-                            </Text>
+                            <Text style={{ fontSize: 11, fontWeight: "700", color: badgeColor }}>{cleanName}</Text>
                           </View>
                         );
                       })}

@@ -1,101 +1,59 @@
-// services/map.service.ts
-import type { UnifiedLocation } from "@/store/journeyStore";
-import Constants from "expo-constants";
+// services/map.ts
+const GOOGLE_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY as string;
 
-const extra = (Constants?.expoConfig?.extra ?? {}) as any;
-const MAPBOX_TOKEN =
-  (process.env.EXPO_PUBLIC_MAPBOX_TOKEN as string) ||
-  (extra.mapboxToken as string);
+export interface PlacePrediction {
+  place_id:       string;
+  description:    string;
+  main_text:      string;
+  secondary_text: string;
+}
 
 export const MapService = {
-  /**
-   * Ping Mapbox to turn user text into real-world addresses.
-   */
-  async geocodeAddress(
+  async placesAutocomplete(
     query: string,
     proximityLat?: number,
     proximityLng?: number,
-  ): Promise<UnifiedLocation[]> {
-    if (!query || query.length < 3) return [];
+  ): Promise<PlacePrediction[]> {
+    if (!query || query.length < 2) return [];
 
-    let url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&country=ke&types=poi,address,place`;
-
-    if (proximityLat && proximityLng) {
-      url += `&proximity=${proximityLng},${proximityLat}`;
-    }
+    const location =
+      proximityLat != null && proximityLng != null
+        ? `&location=${proximityLat},${proximityLng}&radius=30000`
+        : "";
 
     try {
-      const response = await fetch(url);
-      const json = await response.json();
-
-      if (!json.features) return [];
-
-      return json.features.map((f: any) => ({
-        _type: "location" as const,
-        id: f.id,
-        name: f.text,
-        lat: f.center[1],
-        lng: f.center[0],
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&region=ke&components=country:ke&language=en${location}&key=${GOOGLE_KEY}`,
+      );
+      const json = await res.json();
+      if (!json.predictions) return [];
+      return (json.predictions as any[]).slice(0, 5).map((r) => ({
+        place_id:       r.place_id,
+        description:    r.description,
+        main_text:      r.structured_formatting?.main_text ?? r.description.split(",")[0],
+        secondary_text: r.structured_formatting?.secondary_text ?? "",
       }));
-    } catch (error) {
-      console.error("Mapbox Geocoding failed:", error);
+    } catch {
       return [];
     }
   },
 
-  /**
-   * Get the full walking route (Coordinates, Distance, Duration, and STEPS)
-   */
-  async getWalkingRoute(fromLat: number, fromLng: number, toLat: number, toLng: number) {
-    // Notice the &steps=true parameter is back!
-    const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${fromLng},${fromLat};${toLng},${toLat}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`;
-    const response = await fetch(url);
-    const json = await response.json();
-    
-    // Return the entire route object so the map can extract coordinates AND steps
-    return json.routes?.[0] || null;
-  },
-
-  /**
-   * Snaps a rough GTFS shape to the actual Mapbox road network using Chunking.
-   */
-  async snapToRoads(coordinates: [number, number][]): Promise<[number, number][]> {
-    if (!coordinates || coordinates.length < 2) return coordinates;
-
-    // Helper to send a chunk of coordinates to Mapbox
-    const matchChunk = async (chunk: [number, number][]) => {
-      const coordsString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
-      const url = `https://api.mapbox.com/matching/v5/mapbox/driving/${coordsString}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
-      try {
-        const response = await fetch(url);
-        const json = await response.json();
-        if (json.matchings && json.matchings.length > 0) {
-          // Flatten all matchings in this chunk into one array
-          return json.matchings.flatMap((m: any) => m.geometry.coordinates);
-        }
-      } catch (e) {
-        console.warn("Map Matching chunk failed", e);
-      }
-      return chunk; // Fallback to raw if this chunk fails
-    };
-
-    let finalCoords: [number, number][] = [];
-
-    // Mapbox limit is 100. We process the line in chunks of 90 points.
-    for (let i = 0; i < coordinates.length; i += 90) {
-      // Grab 95 points so there's a 5-point overlap to keep the line connected cleanly
-      const chunk = coordinates.slice(i, i + 95);
-      const matchedChunk = await matchChunk(chunk);
-
-      // If we are stitching to a previous chunk, remove the first point to prevent a duplicate dot
-      if (finalCoords.length > 0 && matchedChunk.length > 0) {
-        matchedChunk.shift();
-      }
-      
-      finalCoords.push(...matchedChunk);
+  async getPlaceDetails(
+    placeId: string,
+  ): Promise<{ lat: number; lng: number; name: string } | null> {
+    try {
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=geometry,name&key=${GOOGLE_KEY}`,
+      );
+      const json = await res.json();
+      if (!json.result) return null;
+      return {
+        lat:  json.result.geometry.location.lat,
+        lng:  json.result.geometry.location.lng,
+        name: json.result.name ?? "",
+      };
+    } catch {
+      return null;
     }
-
-    return finalCoords;
-  }
-  
+  },
 };

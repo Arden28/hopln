@@ -4,363 +4,527 @@ import MapFloatingUI from "@/components/app/MapFloatingUI";
 import NearestStopsSheet from "@/components/app/NearestStopsSheet";
 import RouteStepsList from "@/components/app/RouteStepsList";
 import StopDetailsSheet from "@/components/app/StopDetailsSheet";
+import StopQuickCard from "@/components/app/StopQuickCard";
 import StopsLayer from "@/components/app/StopsLayer";
-import polyline from "@mapbox/polyline";
-
-import { useNavigation } from "@/hooks/useNavigation";
-import { MapService } from "@/services/map";
-import { StopService } from "@/services/stop";
-import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
-import { RouteInfo, Step, Stop, bboxFromCoords, getRouteColor, humanizeStep, mToNice, sToMin } from "@/utils/mapHelpers";
-
-import MapboxGL from "@rnmapbox/maps";
-import Constants from "expo-constants";
-import { useRouter } from "expo-router";
-import type { FeatureCollection, LineString, Point } from "geojson";
-import { JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import KwameSheet from "@/components/app/KwameSheet";
 
+import { useNavigation } from "@/hooks/useNavigation";
+import { useMapCamera, zoomFromDelta, deltaFromZoom } from "@/hooks/useMapCamera";
+import type { LatLng } from "@/providers/map/types";
+import { RouteService } from "@/services/route";
+import { StopService } from "@/services/stop";
+import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
+import { RouteInfo, Step, Stop, detectManeuver, getRouteColor, humanizeStep, mToNice, sToMin } from "@/utils/mapHelpers";
+
+import mapStyle from "@/lib/map_style.json";
+
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Image, StyleSheet, View } from "react-native";
+import MapView, { Marker, PROVIDER_GOOGLE, Polyline } from "react-native-maps";
+
 const ORANGE = "#FF6F00";
-const GREEN  = "#34C759";
-const RED    = "#FF3B30";
-const BLACK  = "#000000";
 const BG     = "#F6F7F8";
 
-const extra = (Constants?.expoConfig?.extra ?? {}) as Record<string, unknown>;
-MapboxGL.setAccessToken((process.env.EXPO_PUBLIC_MAPBOX_TOKEN as string) || (extra.mapboxToken as string));
-const STYLE = MapboxGL.StyleURL.Street;
+function LocationPin() {
+  return (
+    <View style={{ alignItems: "center", justifyContent: "center", width: 32, height: 32 }}>
+      <View style={{
+        position: "absolute", width: 32, height: 32, borderRadius: 16,
+        backgroundColor: "rgba(255,111,0,0.14)", borderWidth: 1, borderColor: "rgba(255,111,0,0.30)",
+      }} />
+      <View style={{
+        width: 14, height: 14, borderRadius: 7,
+        backgroundColor: ORANGE, borderWidth: 2.5, borderColor: "#FFFFFF",
+        shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 }, elevation: 6,
+      }} />
+    </View>
+  );
+}
+
+// Route-coloured circle with matatu icon — used for board / alight nodes
+function StopNodeMarker({ color }: { color: string }) {
+  return (
+    <View style={{
+      width: 30, height: 30, borderRadius: 15,
+      backgroundColor: color,
+      alignItems: "center", justifyContent: "center",
+      borderWidth: 2.5, borderColor: "#FFFFFF",
+      shadowColor: "#000", shadowOpacity: 0.28,
+      shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 8,
+    }}>
+      <Image source={require("@/assets/images/matatu.png")} style={{ width: 16, height: 16 }} resizeMode="contain" />
+    </View>
+  );
+}
+
+// Rounded square — used for origin (orange) and destination (dark)
+function SquarePin({ isStart }: { isStart: boolean }) {
+  return (
+    <View style={{
+      width: 20, height: 20, borderRadius: 5,
+      backgroundColor: isStart ? ORANGE : "#1C1C1E",
+      alignItems: "center", justifyContent: "center",
+      borderWidth: 2.5, borderColor: "#FFFFFF",
+      shadowColor: "#000", shadowOpacity: 0.30,
+      shadowRadius: 5, shadowOffset: { width: 0, height: 3 }, elevation: 8,
+    }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.45)" }} />
+    </View>
+  );
+}
+
+// Nairobi city centre default
+const DEFAULT_REGION = {
+  latitude:      -1.286389,
+  longitude:     36.817223,
+  latitudeDelta:  deltaFromZoom(13),
+  longitudeDelta: deltaFromZoom(13),
+};
+
+// ── Internal overlay types (replace GeoJSON FeatureCollections) ──────────────
+
+interface WalkLeg      { id: string; coords: LatLng[] }
+interface TransitLeg   { id: string; coords: LatLng[]; color: string }
+interface NodeMarker   { id: string; coord: LatLng; name: string; color: string }
+interface LocMarker    { id: string; coord: LatLng; name: string; isStart: boolean }
 
 export default function MapScreen() {
   const router = useRouter();
 
-  // Engine Hook
   const { location: me, navState, startNavigation, stopNavigation } = useNavigation();
-  
-  const activeJourney = useJourneyStore((state) => state.activeJourney);
-  const setJourney    = useJourneyStore((state) => state.setJourney); // Need this for AI flow
-  const tripStatus    = useJourneyStore((state) => state.tripStatus);
-  const clearJourney  = useJourneyStore((state) => state.clearJourney);
+
+  const activeJourney = useJourneyStore((s) => s.activeJourney);
+  const setJourney    = useJourneyStore((s) => s.setJourney);
+  const tripStatus    = useJourneyStore((s) => s.tripStatus);
+  const clearJourney  = useJourneyStore((s) => s.clearJourney);
   const navigating    = tripStatus === "IN_TRANSIT";
 
-  const [followMe, setFollowMe] = useState(true);
-  const [selected, setSelected] = useState<Stop | null>(null);
+  const [followMe, setFollowMe]   = useState(true);
+  const [selected, setSelected]   = useState<Stop | null>(null);
 
-  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
+  const [routeInfo, setRouteInfo]     = useState<RouteInfo | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [stepsOpen, setStepsOpen] = useState(false);
+  const [steps, setSteps]             = useState<Step[]>([]);
+  const [stepsOpen, setStepsOpen]     = useState(false);
 
-  const [nearestOpen, setNearestOpen] = useState(false);
+  const [nearestOpen, setNearestOpen]   = useState(false);
   const [nearestStops, setNearestStops] = useState<UnifiedLocation[]>([]);
 
-  const [kwameOpen, setKwameOpen] = useState(false);
+  // All stops for map clustering — loaded once on mount
+  const [allStops, setAllStops] = useState<Stop[]>([]);
 
-  const [walkToOriginFC, setWalkToOriginFC] = useState<FeatureCollection<LineString> | null>(null);
-  const [transitActiveFC, setTransitActiveFC] = useState<FeatureCollection<LineString> | null>(null);
-  const [journeyNodesFC, setJourneyNodesFC] = useState<FeatureCollection<Point> | null>(null);
-  const [locationNodesFC, setLocationNodesFC] = useState<FeatureCollection<Point> | null>(null);
+  // Stop card / details sheet
+  const [stopDetailsOpen, setStopDetailsOpen] = useState(false);
+
+  // Tapped non-stop location pin
+  const [tappedCoord, setTappedCoord] = useState<{ lat: number; lng: number } | null>(null);
+
+  const [kwameOpen, setKwameOpen] = useState(false);
+  const chipJustPressedRef = useRef(false);
+
+  // Route overlay state — typed arrays instead of GeoJSON FeatureCollections
+  const [walkLegs,    setWalkLegs]    = useState<WalkLeg[]>([]);
+  const [transitLegs, setTransitLegs] = useState<TransitLeg[]>([]);
+  const [nodeMarkers, setNodeMarkers] = useState<NodeMarker[]>([]);
+  const [locMarkers,  setLocMarkers]  = useState<LocMarker[]>([]);
 
   const [viewCenter, setViewCenter] = useState<{ lat: number; lng: number } | null>(null);
-  const [viewZoom, setViewZoom] = useState<number>(13);
+  const [viewZoom,   setViewZoom]   = useState<number>(13);
 
-  const cameraRef = useRef<MapboxGL.Camera>(null);
-  const lastCamUpdate = useRef<number>(0);
+  const mapRef      = useRef<MapView>(null);
+  const lastCamTime = useRef<number>(0);
+  const camera      = useMapCamera(mapRef);
 
-  const visibleMapStops = useMemo<Stop[]>(() => {
-    const combined: UnifiedLocation[] = [...nearestStops];
-    if (activeJourney) {
-      if (activeJourney.fromLoc._type === "stop") combined.push(activeJourney.fromLoc);
-      if (activeJourney.toLoc._type === "stop") combined.push(activeJourney.toLoc);
-    }
-    return Array.from(new Map(combined.map((s) => [s.id, s])).values()) as unknown as Stop[];
-  }, [nearestStops, activeJourney]);
+  // Primitive extractions — let effects depend on scalar values, not the object
+  // reference, so heading/speed changes don't trigger unnecessary re-runs.
+  const meLat = me?.latitude  ?? null;
+  const meLng = me?.longitude ?? null;
+
+
+  // ── All stops — fetched once on mount for map clustering ────────────────────
 
   useEffect(() => {
-    if (me && nearestOpen) {
-      StopService.getNearbyStops(me.latitude, me.longitude, 2000, 5)
-        .then(setNearestStops)
-        .catch((e) => console.warn(e));
-    }
-  }, [me?.latitude, me?.longitude, nearestOpen]);
+    StopService.getAllStops()
+      .then((stops) => setAllStops(stops as unknown as Stop[]))
+      .catch((e) => console.warn("Failed to load all stops", e));
+  }, []);
+
+  // ── Nearest stops fetch ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (meLat == null || meLng == null || !nearestOpen) return;
+    StopService.getNearbyStops(meLat, meLng, 2000, 5)
+      .then(setNearestStops)
+      .catch((e) => console.warn(e));
+  }, [meLat, meLng, nearestOpen]);
+
+  // ── Follow mode (exploration, non-navigation) ────────────────────────────────
+  // North-up during browsing; no heading rotation so the map stays stable.
+
+  useEffect(() => {
+    if (meLat == null || meLng == null || !followMe || navigating) return;
+    camera.animateTo({ center: { latitude: meLat, longitude: meLng }, zoom: 16, heading: 0, duration: 300 });
+  }, [meLat, meLng, followMe, navigating, camera]);
+
+  // ── Navigation camera (device-bearing locked, pitch 45) ─────────────────────
+  // Use the live device heading so the map rotates with the user, exactly like
+  // Google Maps navigation. Fall back to route segment bearing if heading is
+  // unavailable (e.g. no compass on device or speed too low for GPS heading).
+
+  useEffect(() => {
+    if (!me || !followMe || !navigating || !navState) return;
+    const now = Date.now();
+    if (now - lastCamTime.current < 320) return;
+    lastCamTime.current = now;
+
+    camera.animateTo({
+      center:  { latitude: me.latitude, longitude: me.longitude },
+      zoom:    18.0 + (Math.min(me.speed ?? 0, 2.0) / 2.0) * 0.15,
+      heading: me.heading ?? navState.routeBearing ?? 0,
+      pitch:   45,
+      duration: 300,
+    });
+  }, [me, followMe, navigating, navState, camera]);
+
+  // ── Journey overlay builder ───────────────────────────────────────────────────
 
   useEffect(() => {
     if (!activeJourney) {
-      setWalkToOriginFC(null);
-      setTransitActiveFC(null);
-      setJourneyNodesFC(null);
-      setLocationNodesFC(null);
+      setWalkLegs([]);
+      setTransitLegs([]);
+      setNodeMarkers([]);
+      setLocMarkers([]);
       return;
     }
 
     setSelected(null);
     setFollowMe(false);
-    // setRouteLoading(true);
-    // Kwame or normal search can trigger this. Kwame flow handles setting state. normal flow too.
-    if (!activeJourney.is_ai_derived) { 
-        setRouteLoading(true);
-    }
+    if (!activeJourney.route.is_ai_derived) setRouteLoading(true);
 
-    const fetchJourneyShapes = async () => {
+    const build = async () => {
       try {
         const { route, fromLoc, toLoc } = activeJourney;
         const segments = route.segments;
-        if (!segments || segments.length === 0) return;
+        if (!segments?.length) return;
 
-        const summarySteps: Step[] = [];
-        const walkFeatures: any[] = [];
-        const transitFeaturesActive: any[] = [];
-        const transferNodes: any[] = [];
-        const locNodes: any[] = [];
+        const summarySteps: Step[]  = [];
+        const newWalkLegs: WalkLeg[]       = [];
+        const newTransitLegs: TransitLeg[] = [];
+        const newNodeMarkers: NodeMarker[] = [];
+        const newLocMarkers: LocMarker[]   = [];
 
         if (fromLoc._type === "location" && fromLoc.id !== "current_location") {
-          locNodes.push({ type: "Feature", geometry: { type: "Point", coordinates: [fromLoc.lng, fromLoc.lat] }, properties: { name: fromLoc.name, type: "start" } });
+          newLocMarkers.push({ id: "loc-from", coord: { latitude: fromLoc.lat, longitude: fromLoc.lng }, name: fromLoc.name, isStart: true });
         }
         if (toLoc._type === "location" && toLoc.id !== "current_location") {
-          locNodes.push({ type: "Feature", geometry: { type: "Point", coordinates: [toLoc.lng, toLoc.lat] }, properties: { name: toLoc.name, type: "end" } });
+          newLocMarkers.push({ id: "loc-to", coord: { latitude: toLoc.lat, longitude: toLoc.lng }, name: toLoc.name, isStart: false });
         }
+
+        // Collect all coords for initial camera fit
+        let allCoords: LatLng[] = [];
 
         for (let i = 0; i < segments.length; i++) {
           const seg = segments[i];
-          const decodedCoords = polyline.decode(seg.polyline).map((c) => [c[1], c[0]] as [number, number]);
+
+          // seg.coordinates is [[lat, lng], ...] from the API
+          const coords: LatLng[] = seg.coordinates.map(([lat, lng]) => ({
+            latitude: lat, longitude: lng,
+          }));
+
+          allCoords = allCoords.concat(coords);
 
           if (seg.mode === "WALK") {
-            walkFeatures.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: decodedCoords } });
-            summarySteps.push({ instruction: `Walk to ${seg.to.name === "Destination" ? toLoc.name : seg.to.name}`, distance: seg.distance, duration: seg.duration, location: [seg.to.lng, seg.to.lat], type: "walk" });
+            newWalkLegs.push({ id: `walk-${i}`, coords });
+            summarySteps.push({
+              instruction: `Walk to ${seg.to.name === "Destination" ? toLoc.name : seg.to.name}`,
+              distance: seg.distance,
+              duration: seg.duration,
+              location: [seg.to.lng, seg.to.lat],
+              type: "walk",
+              subSteps: (seg.walk_steps ?? []).map((ws: any) => ({
+                instruction: ws.instruction,
+                note:        ws.note,
+                distance:    ws.distance,
+                duration:    ws.duration,
+                lat:         ws.lat,
+                lng:         ws.lng,
+                maneuver:    detectManeuver(ws.instruction),
+              })),
+            });
           } else {
-            const routeColor = getRouteColor(seg.route_name ?? "");
-            const snappedActive = await MapService.snapToRoads(decodedCoords);
-            const effectiveCoords = snappedActive.length > 0 ? snappedActive : decodedCoords;
+            const color    = getRouteColor(seg.route_name ?? "");
+            const fromName = seg.from.name === "Origin"      ? fromLoc.name : seg.from.name;
+            const toName   = seg.to.name   === "Destination" ? toLoc.name   : seg.to.name;
 
-            transitFeaturesActive.push({ type: "Feature", properties: { segmentIndex: i, routeColor }, geometry: { type: "LineString", coordinates: effectiveCoords } });
-            
-            const fromName = seg.from.name === "Origin" ? fromLoc.name : seg.from.name;
-            const toName = seg.to.name === "Destination" ? toLoc.name : seg.to.name;
-
-            transferNodes.push(
-              { type: "Feature", geometry: { type: "Point", coordinates: [seg.from.lng, seg.from.lat] }, properties: { name: fromName, color: routeColor } },
-              { type: "Feature", geometry: { type: "Point", coordinates: [seg.to.lng, seg.to.lat] }, properties: { name: toName, color: routeColor } }
+            newTransitLegs.push({ id: `transit-${i}`, coords, color });
+            newNodeMarkers.push(
+              { id: `node-from-${i}`, coord: { latitude: seg.from.lat, longitude: seg.from.lng }, name: fromName, color },
+              { id: `node-to-${i}`,   coord: { latitude: seg.to.lat,   longitude: seg.to.lng   }, name: toName,   color },
             );
-
             summarySteps.push(
-              { instruction: `Board Line ${seg.route_name} at ${fromName}`, distance: 0, duration: 0, location: [seg.from.lng, seg.from.lat], type: "depart" },
-              { instruction: `Alight at ${toName}`, distance: seg.distance, duration: seg.duration, location: [seg.to.lng, seg.to.lat], type: "arrive" }
+              { instruction: `Board Line ${seg.route_name} at ${fromName}`, distance: 0,            duration: 0,            location: [seg.from.lng, seg.from.lat], type: "depart", routeName: seg.route_name ?? undefined, routeColor: color, stops: seg.stops },
+              { instruction: `Alight at ${toName}`,                         distance: seg.distance, duration: seg.duration, location: [seg.to.lng,   seg.to.lat  ], type: "arrive", routeName: seg.route_name ?? undefined, routeColor: color },
             );
           }
         }
 
-        setWalkToOriginFC(walkFeatures.length > 0 ? { type: "FeatureCollection", features: walkFeatures } : null);
-        setTransitActiveFC(transitFeaturesActive.length > 0 ? { type: "FeatureCollection", features: transitFeaturesActive } : null);
-        setJourneyNodesFC(transferNodes.length > 0 ? ({ type: "FeatureCollection", features: transferNodes } as FeatureCollection<Point>) : null);
-        setLocationNodesFC(locNodes.length > 0 ? ({ type: "FeatureCollection", features: locNodes } as FeatureCollection<Point>) : null);
-
+        setWalkLegs(newWalkLegs);
+        setTransitLegs(newTransitLegs);
+        setNodeMarkers(newNodeMarkers);
+        setLocMarkers(newLocMarkers);
         setSteps(summarySteps);
         setRouteInfo({ distance: route.total_distance, duration: route.total_duration });
 
-        // Initial Concern Zone Framing
-        if (segments.length > 0) {
-          let firstLegCoords = polyline.decode(segments[0].polyline).map(c => [c[1], c[0]] as [number, number]);
-          firstLegCoords = firstLegCoords.filter(c => c[0] !== 0 && c[1] !== 0 && !isNaN(c[0]));
+        // Fit camera to first leg
+        const firstSegCoords: LatLng[] = segments[0].coordinates
+          .map(([lat, lng]) => ({ latitude: lat, longitude: lng }))
+          .filter(({ latitude, longitude }) => latitude !== 0 && longitude !== 0 && !isNaN(latitude));
 
-          if (firstLegCoords.length > 1) {
-            const [minLng, minLat, maxLng, maxLat] = bboxFromCoords(firstLegCoords);
-            cameraRef.current?.fitBounds([maxLng, maxLat], [minLng, minLat], [140, 40, 320, 40], 800);
-          }
+        if (firstSegCoords.length > 1) {
+          camera.fitCoordinates(firstSegCoords, { top: 140, right: 40, bottom: 320, left: 40 });
         }
       } catch (err) {
-        console.warn("Failed to decode OTP geometry", err);
+        console.warn("Failed to build journey overlays", err);
       } finally {
         setRouteLoading(false);
       }
     };
 
-    fetchJourneyShapes();
-  }, [activeJourney]);
+    build();
+  }, [activeJourney, camera]);
 
-  // Dynamic Camera Engine
-  useEffect(() => {
-    if (!me || !followMe || !navigating || !navState) return;
-    
-    const now = Date.now();
-    if (now - lastCamUpdate.current < 320) return;
-    lastCamUpdate.current = now;
-
-    cameraRef.current?.setCamera({
-      centerCoordinate: [me.longitude, me.latitude],
-      zoomLevel: 18.0 + (Math.min(me.speed ?? 0, 2.0) / 2.0) * 0.15,
-      heading: navState.routeBearing,
-      pitch: 45,
-      animationDuration: 300,
-    });
-  }, [me, followMe, navigating, navState]);
+  // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleClearJourney = useCallback(() => {
     stopNavigation();
     clearJourney();
     setSteps([]);
     setFollowMe(true);
+    setTappedCoord(null);
   }, [stopNavigation, clearJourney]);
 
   const handleSelectStop = useCallback((s: Stop) => {
     stopNavigation();
     setFollowMe(false);
     setSelected(s);
+    setStopDetailsOpen(false);
     setNearestOpen(false);
     setStepsOpen(false);
-    cameraRef.current?.setCamera({ centerCoordinate: [s.lng, s.lat], zoomLevel: 17.2, animationDuration: 500 });
-  }, [stopNavigation]);
+    setTappedCoord(null);
+    camera.animateTo({ center: { latitude: s.lat, longitude: s.lng }, zoom: 17.2, duration: 500 });
+  }, [stopNavigation, camera]);
 
-  
-  // NEW HANDLER FOR AI FLOW
+  const handleGoToStop = useCallback(async () => {
+    if (!me || !selected) return;
+    setRouteLoading(true);
+    setStopDetailsOpen(false);
+
+    const fromLoc: UnifiedLocation = {
+      id: "current_location", name: "Current Location", _type: "location",
+      lat: me.latitude, lng: me.longitude,
+    };
+    const toLoc: UnifiedLocation = {
+      id: selected.id, name: selected.name, _type: "stop",
+      lat: selected.lat, lng: selected.lng,
+    };
+
+    try {
+      const routes = await RouteService.calculateJourney(fromLoc, toLoc);
+      if (routes.length > 0) setJourney(fromLoc, toLoc, routes[0]);
+    } catch (e) {
+      console.warn("Failed to calculate route to stop", e);
+      setRouteLoading(false);
+    }
+  }, [me, selected, setJourney]);
+
   const handleAiDeriveJourney = useCallback((aiRouteResponse: any) => {
     if (!me) return;
-    
-    setSteps([]); // Clear visual hierarchy before drawing new one
+    setSteps([]);
     setRouteLoading(true);
 
-    // AI assumes "Current Location" as Origin usually.
     const fromLoc: UnifiedLocation = {
-        id: 'current_location',
-        name: 'Current Location',
-        _type: 'location',
-        lat: me.latitude,
-        lng: me.longitude
+      id: "current_location", name: "Current Location", _type: "location",
+      lat: me.latitude, lng: me.longitude,
     };
-
-    // Extract basic to Location from AI response summary
     const toLoc: UnifiedLocation = {
-        id: aiRouteResponse.summary, // simplified ID usage
-        name: aiRouteResponse.summary.replace('Via ', ''),
-        _type: 'location',
-        lat: aiRouteResponse.segments[aiRouteResponse.segments.length - 1].to.lat,
-        lng: aiRouteResponse.segments[aiRouteResponse.segments.length - 1].to.lng,
+      id:    aiRouteResponse.summary,
+      name:  aiRouteResponse.summary.replace("Via ", ""),
+      _type: "location",
+      lat:   aiRouteResponse.segments[aiRouteResponse.segments.length - 1].to.lat,
+      lng:   aiRouteResponse.segments[aiRouteResponse.segments.length - 1].to.lng,
     };
 
-    // Set the state. Note: I added a flag 'is_ai_derived' just to manage loading spinners.
-    setJourney(fromLoc, toLoc, {...aiRouteResponse, is_ai_derived: true});
-    
-    // Auto start navigation since the user asked AI to plan it
+    setJourney(fromLoc, toLoc, { ...aiRouteResponse, is_ai_derived: true });
     setTimeout(() => startNavigation(), 300);
-
   }, [me, setJourney, startNavigation]);
 
   const handleToggleNav = useCallback((nextState: boolean) => {
-    if (nextState) {
-      startNavigation();
-      setFollowMe(true);
-    } else {
-      stopNavigation();
-      setFollowMe(false);
-    }
+    if (nextState) { startNavigation(); setFollowMe(true); }
+    else           { stopNavigation();  setFollowMe(false); }
   }, [startNavigation, stopNavigation]);
 
-  const onCameraChanged = useCallback((e: any) => {
-    const isGesture = e?.properties?.isUserInteraction || e?.properties?.isGesture;
-    if (isGesture) setFollowMe(false);
+  // ── Region change → update zoom + center for StopsLayer ──────────────────────
 
-    const z = e?.properties?.zoom;
-    const center = e?.properties?.center;
-    if (!z || !center) return;
-    setViewZoom(z);
-    setViewCenter({ lat: center[1], lng: center[0] });
+  const onRegionChangeComplete = useCallback((region: any, details: any) => {
+    if (details?.isGesture) setFollowMe(false);
+    setViewZoom(zoomFromDelta(region.latitudeDelta));
+    setViewCenter({ lat: region.latitude, lng: region.longitude });
   }, []);
 
-  const nextStepIdx = navState?.stepIndex ?? 0;
-  const nextStep = steps[nextStepIdx];
+  const nextStep    = steps[navState?.stepIndex ?? 0];
   const nextPreview = nextStep ? humanizeStep(nextStep) : null;
-
-  if (!me) return <View style={styles.center}><ActivityIndicator size="large" color={ORANGE} /></View>;
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
-      <MapboxGL.MapView
+      <MapView
+        ref={mapRef}
         style={{ flex: 1 }}
-        styleURL={STYLE}
-        onCameraChanged={onCameraChanged}
-        compassViewPosition={1}
-        compassViewMargins={{ x: 20, y: 100 }}
-        logoEnabled={true}
-        scaleBarEnabled={false}
+        provider={PROVIDER_GOOGLE}
+        initialRegion={DEFAULT_REGION}
+        showsUserLocation={!!me}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        showsBuildings={false}
+        onRegionChangeComplete={onRegionChangeComplete}
+        customMapStyle={mapStyle}
       >
-        <MapboxGL.Camera
-          ref={cameraRef}
-          defaultSettings={{ centerCoordinate: [36.817223, -1.286389], zoomLevel: 13 }}
-          followUserLocation={followMe && !navigating} // Native Mapbox follow for exploring
-          followUserMode={MapboxGL.UserTrackingModes.Follow}
-        />
-        <MapboxGL.Images images={{ "matatu-pin": require("@/assets/images/matatu.png") }} />
-        <MapboxGL.UserLocation showsUserHeadingIndicator />
+        {/* Walking route legs — dashed grey, below transit */}
+        {walkLegs.map((leg) => (
+          <Polyline
+            key={leg.id}
+            coordinates={leg.coords}
+            strokeColor="#8E8E93"
+            strokeWidth={3}
+            lineDashPattern={[6, 5]}
+            zIndex={1}
+          />
+        ))}
 
-        {walkToOriginFC && (
-          <MapboxGL.ShapeSource id="walk-leg-source" shape={walkToOriginFC}>
-            <MapboxGL.LineLayer id="walk-leg-line" style={{ lineColor: "#9CA3AF", lineWidth: 3.5, lineDasharray: [1, 2], lineCap: "round", lineJoin: "round" }} />
-          </MapboxGL.ShapeSource>
+        {/* Transit route legs — road-snapped, solid, route-coloured */}
+        {transitLegs.map((leg) => (
+          <Polyline
+            key={leg.id}
+            coordinates={leg.coords}
+            strokeColor={leg.color}
+            strokeWidth={5}
+            zIndex={2}
+            geodesic
+          />
+        ))}
+
+        {/* Board/alight node markers — route-coloured circle with matatu icon */}
+        {nodeMarkers.map((m) => (
+          <Marker
+            key={m.id}
+            coordinate={m.coord}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <StopNodeMarker color={m.color} />
+          </Marker>
+        ))}
+
+        {/* Origin / destination — branded rounded square (Uber-style) */}
+        {locMarkers.map((m) => (
+          <Marker
+            key={m.id}
+            coordinate={m.coord}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <SquarePin isStart={m.isStart} />
+          </Marker>
+        ))}
+
+        {/* Heading arrow during navigation */}
+        {navigating && me && (
+          <Marker
+            coordinate={{ latitude: me.latitude, longitude: me.longitude }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            flat
+            rotation={me.heading ?? 0}
+            tracksViewChanges
+          >
+            <View style={styles.headingArrow} />
+          </Marker>
         )}
 
-        {transitActiveFC && (
-          <MapboxGL.ShapeSource id="transit-active-source" shape={transitActiveFC}>
-            <MapboxGL.LineLayer id="transit-active-line" style={{ lineColor: ["get", "routeColor"], lineWidth: 6, lineOpacity: 1.0, lineCap: "round", lineJoin: "round" }} />
-          </MapboxGL.ShapeSource>
+        {!activeJourney && (
+          <StopsLayer
+            allStops={allStops}
+            viewCenter={viewCenter}
+            viewZoom={viewZoom}
+            selected={selected}
+            onPress={handleSelectStop}
+          />
         )}
+      </MapView>
 
-        {journeyNodesFC && (
-          <MapboxGL.ShapeSource id="journey-nodes-source" shape={journeyNodesFC}>
-            <MapboxGL.CircleLayer id="journey-nodes-circle" style={{ circleColor: "#FFFFFF", circleRadius: 6, circleStrokeWidth: 2, circleStrokeColor: ["get", "color"] }} />
-            <MapboxGL.SymbolLayer id="journey-nodes-text" style={{ textField: "{name}", textSize: 11.5, textColor: "#333333", textHaloColor: "#FFFFFF", textHaloWidth: 2, textAnchor: "left", textOffset: [1, 0] }} />
-          </MapboxGL.ShapeSource>
-        )}
-
-        {locationNodesFC && (
-          <MapboxGL.ShapeSource id="location-nodes-source" shape={locationNodesFC}>
-            <MapboxGL.CircleLayer id="location-nodes-circle" style={{ circleColor: ["case", ["==", ["get", "type"], "start"], GREEN, RED], circleRadius: 7, circleStrokeWidth: 2, circleStrokeColor: "#FFFFFF" }} />
-            <MapboxGL.SymbolLayer id="location-nodes-text" style={{ textField: "{name}", textSize: 12, textColor: "#333333", textHaloColor: "#FFFFFF", textHaloWidth: 2, textAnchor: "top", textOffset: [0, 0.8] }} />
-          </MapboxGL.ShapeSource>
-        )}
-
-        <StopsLayer allStops={visibleMapStops} viewCenter={viewCenter} viewZoom={viewZoom} selected={selected} onPress={(e: any) => { const f = visibleMapStops.find(s => s.id === e?.features?.[0]?.properties?.id); if(f) handleSelectStop(f); }} />
-      </MapboxGL.MapView>
+      {!me && (
+        <View style={styles.locatingOverlay}>
+          <ActivityIndicator size="large" color={ORANGE} />
+        </View>
+      )}
 
       <MapFloatingUI
-        onRecenter={() => { setFollowMe(true); cameraRef.current?.setCamera({ centerCoordinate: [me.longitude, me.latitude], zoomLevel: 16, animationDuration: 450 })}}
-        onOpenSearch={() => router.push("/search")}
-        onOpenKwame={() => { setNearestOpen(false); setKwameOpen(true); }}
+        onRecenter={() => {
+          setFollowMe(true);
+          if (me) camera.animateTo({ center: { latitude: me.latitude, longitude: me.longitude }, zoom: 16, duration: 450 });
+        }}
+        onOpenSearch={() => {
+          if (chipJustPressedRef.current) { chipJustPressedRef.current = false; return; }
+          router.push("/search");
+        }}
+        onOpenKwame={() => { chipJustPressedRef.current = true; setNearestOpen(false); setKwameOpen(true); }}
         navigating={navigating}
         onToggleNav={() => handleToggleNav(!navigating)}
         nextPreview={nextPreview}
         nextStep={nextStep}
         eta={navState?.eta ?? null}
         remainingDistanceM={navState?.remainingDistanceM ?? null}
-        arrivalSoonShown={navState?.status === 'arrived'}
-        hasSelectedStop={!!selected}
-        onToggleNearest={() => { setKwameOpen(false); setNearestOpen((v) => !v); }}
-        nearestCount={nearestStops.length}
-        hasLocation={!!me}
+        arrivalSoonShown={navState?.status === "arrived"}
         activeJourney={activeJourney}
         onClearJourney={handleClearJourney}
+        bottomOffset={
+          selected && !activeJourney && stopDetailsOpen ? 280
+          : selected && !activeJourney ? 180
+          : 0
+        }
       />
 
-      {/* Sheets... */}
-      
-      <KwameSheet 
-        open={kwameOpen} 
-        onClose={() => setKwameOpen(false)} 
+      <KwameSheet
+        open={kwameOpen}
+        onClose={() => setKwameOpen(false)}
         me={me}
-        onStartJourney={handleAiDeriveJourney} // Connects the AI Orchestration
+        onStartJourney={handleAiDeriveJourney}
       />
 
       {!selected && !activeJourney && (
         <NearestStopsSheet nearestOpen={nearestOpen} setNearestOpen={setNearestOpen} nearest={nearestStops} me={me} onSelect={handleSelectStop} />
       )}
 
-      {selected && !activeJourney && (
-        <StopDetailsSheet selected={selected} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={() => { setSelected(null); setFollowMe(true); }} mToNice={mToNice} sToMin={sToMin} >
-          <RouteStepsList steps={steps} stepsOpen={stepsOpen} setStepsOpen={setStepsOpen} nextPreview={nextPreview} nextStepIdx={nextStepIdx} navigating={navigating} selectedName={selected.name} />
-        </StopDetailsSheet>
+      {selected && !activeJourney && !stopDetailsOpen && (
+        <StopQuickCard
+          stop={selected}
+          onClose={() => { setSelected(null); setFollowMe(true); }}
+          onGoToStop={handleGoToStop}
+          onViewDetails={() => setStopDetailsOpen(true)}
+          loading={routeLoading}
+        />
+      )}
+
+      {selected && !activeJourney && stopDetailsOpen && (
+        <StopDetailsSheet
+          stop={selected}
+          onClose={() => setStopDetailsOpen(false)}
+        />
       )}
 
       {activeJourney && (
-        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin} >
-          <RouteStepsList steps={steps} stepsOpen={stepsOpen} setStepsOpen={setStepsOpen} nextPreview={nextPreview} nextStepIdx={nextStepIdx} navigating={navigating} selectedName={activeJourney.toLoc.name} />
+        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin}>
+          <RouteStepsList steps={steps} stepsOpen={stepsOpen} setStepsOpen={setStepsOpen} nextPreview={nextPreview} nextStepIdx={navState?.stepIndex ?? 0} navigating={navigating} selectedName={activeJourney.toLoc.name} />
         </JourneyDetailsSheet>
       )}
     </View>
@@ -369,4 +533,15 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
+  locatingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  headingArrow: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 16,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: "#007AFF",
+  },
 });

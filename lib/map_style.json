@@ -1,0 +1,6 @@
+[
+  { "featureType": "poi",                   "stylers": [{ "visibility": "off" }] },
+  { "featureType": "poi.park", "elementType": "geometry",     "stylers": [{ "visibility": "on" }] },
+  { "featureType": "poi.park", "elementType": "labels.text",  "stylers": [{ "visibility": "on" }] },
+  { "featureType": "transit.station",       "stylers": [{ "visibility": "off" }] }
+]

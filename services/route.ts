@@ -1,17 +1,39 @@
 import type { UnifiedLocation } from "@/store/journeyStore";
 import { fetchApi } from "./apiClient";
 
+export interface WalkStep {
+  instruction: string;
+  distance: number;
+  lat: number;
+  lng: number;
+}
+
+export interface RouteStop {
+  name: string;
+  lat:  number;
+  lng:  number;
+}
+
 export interface RouteSegment {
   mode: "WALK" | "BUS" | "TRAM" | "SUBWAY" | "RAIL" | "FERRY";
   duration: number;
   distance: number;
   route_name?: string;
+  /** Google Polyline5-encoded geometry. Kept for backward compat; prefer `coordinates`. */
   polyline: string;
+  /** Decoded [[lat, lng], ...] pairs — use these directly with Google Maps or any renderer. */
+  coordinates: [number, number][];
+  walk_steps: WalkStep[];
+  /** Ordered stops for transit legs: [boarding, ...intermediate, alighting]. */
+  stops?: RouteStop[];
   from: { name: string; lat: number; lng: number };
   to: { name: string; lat: number; lng: number };
 }
 
 export interface Route {
+  polyline_encoding: "google";
+  /** Set to true when the route was derived from the AI assistant, not a manual search. */
+  is_ai_derived?: boolean;
   type: "direct" | "transfer";
   summary: string;
   total_duration: number;

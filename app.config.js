@@ -25,9 +25,13 @@ module.exports = {
       bundleIdentifier: getBundleId(),
       buildNumber: "1",
       supportsTablet: true,
+      config: {
+        googleMapsApiKey: "AIzaSyCu4R4EoyuIdNiY8K-SBKiP6vDc15AqRWU",
+      },
       infoPlist: {
-        NSLocationWhenInUseUsageDescription:
-          "We use your location to show nearby stages.",
+        NSLocationWhenInUseUsageDescription: "We use your location to show nearby stages.",
+        NSLocationAlwaysAndWhenInUseUsageDescription: "We use your location to show nearby stages.",
+        NSLocationAlwaysUsageDescription: "We use your location to show nearby stages.",
         ITSAppUsesNonExemptEncryption: false,
       },
     },
@@ -53,10 +57,10 @@ module.exports = {
     plugins: [
       "expo-router",
       [
-        "@rnmapbox/maps",
+        "react-native-maps",
         {
-          RNMapboxMapsImpl: "mapbox",
-          RNMapboxMapsDownloadToken: process.env.MAPBOX_DOWNLOADS_TOKEN || "",
+          iosGoogleMapsApiKey: "AIzaSyCu4R4EoyuIdNiY8K-SBKiP6vDc15AqRWU",
+          androidGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
         },
       ],
       [
@@ -80,8 +84,7 @@ module.exports = {
 
     extra: {
       router: {},
-      mapboxToken: process.env.EXPO_PUBLIC_MAPBOX_TOKEN,
-      mapboxStyleUrl: process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL,
+      googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
       eas: {
         projectId: "acc62a4b-150f-4ea6-b0f3-296dca0d6683",
       },

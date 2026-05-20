@@ -1,17 +1,12 @@
 // hooks/useStopSearch.ts
 import { Storage } from "@/app/lib/storage";
+import { MapService, type PlacePrediction } from "@/services/map";
 import { StopService } from "@/services/stop";
 import { UnifiedLocation } from "@/store/journeyStore";
-import Constants from "expo-constants";
 import { useEffect, useState } from "react";
 
 type Coords = { latitude: number; longitude: number };
 const RECENTS_KEY = "location-recents-v1";
-
-const extra = (Constants?.expoConfig?.extra ?? {}) as any;
-const MAPBOX_TOKEN =
-  (process.env.EXPO_PUBLIC_MAPBOX_TOKEN as string) ||
-  (extra.mapboxToken as string);
 
 // --- SAFE STORAGE SHIM ---
 const memoryStore = new Map<string, string>();
@@ -30,11 +25,13 @@ const SafeStorage =
   } as Pick<typeof Storage, "getItem" | "setItem" | "removeItem">);
 
 export function useStopSearch(query: string, me: Coords | null) {
-  const [recents, setRecents] = useState<UnifiedLocation[]>([]);
-  const [matches, setMatches] = useState<{ item: UnifiedLocation; blended: number }[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const [recents, setRecents]                   = useState<UnifiedLocation[]>([]);
+  const [stops, setStops]                       = useState<UnifiedLocation[]>([]);
+  const [places, setPlaces]                     = useState<PlacePrediction[]>([]);
+  const [isSearchingStops, setIsSearchingStops] = useState(false);
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
 
-  // Load Recents
+  // Load recents from storage once
   useEffect(() => {
     (async () => {
       try {
@@ -44,72 +41,52 @@ export function useStopSearch(query: string, me: Coords | null) {
     })();
   }, []);
 
-  // Perform Search
+  // Parallel search: local stops + Google Places
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
-      setMatches([]);
-      setIsSearching(false);
+      setStops([]);
+      setPlaces([]);
+      setIsSearchingStops(false);
+      setIsSearchingPlaces(false);
       return;
     }
 
-    setIsSearching(true); // Start loading when typing passes 2 chars
+    setIsSearchingStops(true);
+    setIsSearchingPlaces(true);
 
-    const searchTimeout = setTimeout(async () => {
-      try {
-        // 1. QUERY YOUR LOCAL POI LAYER FIRST
-        const backendStops = await StopService.searchStops(q);
-        
-        let localMatches = backendStops.map((s, idx) => ({
-          item: {
-            _type: "stop" as const,
-            id: s.id,
-            name: s.name,
-            lat: s.lat,
-            lng: s.lng,
-            route_nams: s.route_nams,
-          },
-          blended: 1.0 - (idx * 0.01), 
-        }));
+    let stale = false;
 
-        // 2. FALLBACK TO MAPBOX IF NEEDED
-        let remoteMatches: any[] = [];
-        if (localMatches.length < 3) {
-          const proxParam = me ? `&proximity=${me.longitude},${me.latitude}` : "";
-          const res = await fetch(
-            `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&country=ke&types=poi,address,place${proxParam}`
+    const timer = setTimeout(() => {
+      StopService.searchStops(q)
+        .then((results) => {
+          if (stale) return;
+          setStops(
+            results.map((s) => ({
+              _type:      "stop" as const,
+              id:         s.id,
+              name:       s.name,
+              lat:        s.lat,
+              lng:        s.lng,
+              route_nams: s.route_nams,
+            })),
           );
-          const json = await res.json();
+        })
+        .catch(() => {})
+        .finally(() => { if (!stale) setIsSearchingStops(false); });
 
-          if (json.features) {
-            remoteMatches = json.features.map((f: any, idx: number) => ({
-              item: {
-                _type: "location" as const,
-                id: f.id,
-                name: f.text,
-                lat: f.center[1],
-                lng: f.center[0],
-              },
-              blended: 0.8 - (idx * 0.05),
-            }));
-          }
-        }
-
-        // 3. COMBINE AND DISPLAY
-        const combined = [...localMatches, ...remoteMatches].sort(
-          (a, b) => b.blended - a.blended,
-        );
-        setMatches(combined);
-
-      } catch (e) {
-        console.warn("Search failed", e);
-      } finally {
-        setIsSearching(false); // Stop loading regardless of success/fail
-      }
-    }, 300); // 300ms debounce
+      MapService.placesAutocomplete(q, me?.latitude, me?.longitude)
+        .then((predictions) => {
+          if (stale) return;
+          setPlaces(predictions);
+        })
+        .catch(() => {})
+        .finally(() => { if (!stale) setIsSearchingPlaces(false); });
+    }, 300);
 
     return () => {
-      clearTimeout(searchTimeout);
+      stale = true;
+      clearTimeout(timer);
     };
   }, [query, me?.latitude, me?.longitude]);
 
@@ -121,5 +98,5 @@ export function useStopSearch(query: string, me: Coords | null) {
     } catch {}
   };
 
-  return { recents, matches, pushRecent, isSearching };
+  return { recents, stops, places, pushRecent, isSearchingStops, isSearchingPlaces };
 }

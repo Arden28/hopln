@@ -34,7 +34,7 @@ const api = axios.create({
     "Content-Type": "application/json",
     Accept: "application/json",
   },
-  timeout: 30000, // 30s before timeout
+  timeout: 120000, // 120s — AI pipeline (Whisper + GPT + OTP + TTS) can take up to 90s
 });
 
 // --- REQUEST LOGGER ---

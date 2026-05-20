@@ -2,6 +2,9 @@
 import type { UnifiedLocation } from "@/store/journeyStore";
 import { fetchApi } from "./apiClient";
 
+// Module-level cache — stops are fetched once per app session
+let _allStopsCache: Stop[] | null = null;
+
 export interface Stop {
   id: string;
   name: string;
@@ -15,7 +18,44 @@ export interface Stop {
   route_nams: string | null;
 }
 
+export interface StopRoute {
+  id: string;
+  short_name: string;
+  long_name: string;
+  route_type: number;
+}
+
+export interface StopDetail {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  location_t: number;
+  routes: StopRoute[];
+}
+
 export const StopService = {
+  /**
+   * Fetches all stops once and caches them for the app session.
+   * Returns slim objects: { id, name, lat, lng }.
+   */
+  async getAllStops(): Promise<Stop[]> {
+    if (_allStopsCache) return _allStopsCache;
+    const data = await fetchApi<{ data: Stop[] }>("/stops/all");
+    _allStopsCache = data.data;
+    return _allStopsCache;
+  },
+
+
+  /**
+   * Fetches full stop detail including resolved routes from the routes table.
+   * Cached 30 min server-side; no client-side cache (sheet re-fetches per stop).
+   */
+  async getStopDetails(id: string): Promise<StopDetail> {
+    const data = await fetchApi<{ data: StopDetail }>(`/stops/${id}`);
+    return data.data;
+  },
+
   /**
    * Fetch the physical stops nearest to the user's GPS.
    * Replaces the local dMeters array sorting in map.tsx.
