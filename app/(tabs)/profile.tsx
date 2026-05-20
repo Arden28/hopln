@@ -1,9 +1,11 @@
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { AuthService } from "@/services/auth";
+import { useAuthStore } from "@/store/authStore";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 const BLACK = "#000";
 const ORANGE = "#FF6F00";
@@ -48,25 +50,41 @@ function Pill({ children }: { children: React.ReactNode }) {
 
 export default function Profile() {
   const router = useRouter();
+  const { user, logout } = useAuthStore();
+
+  const handleLogout = async () => {
+    try { await AuthService.logout(); } catch {}
+    await logout();
+    router.replace("/(auth)/login" as any);
+  };
+
+  const initials = user?.name
+    ? user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
+    : "?";
 
   return (
     <ScrollView contentContainerStyle={styles.sheetBody}>
-      {/* Top bar (flat) */}
-
       {/* Header */}
       <View style={styles.header}>
-        <Image
-          source={require("@/assets/images/avatar.png")}
-          style={styles.avatar}
-          contentFit="cover"
-        />
+        {user?.avatar ? (
+          <Image source={{ uri: user.avatar }} style={styles.avatar} contentFit="cover" />
+        ) : (
+          <View style={[styles.avatar, styles.avatarFallback]}>
+            <Text style={styles.avatarInitials}>{initials}</Text>
+          </View>
+        )}
         <View style={{ gap: 4 }}>
           <ThemedText type="title" style={{ fontSize: 22, color: BLACK }}>
-            Brian Mwangi
+            {user?.name ?? "—"}
           </ThemedText>
           <ThemedText style={{ opacity: 0.7 }}>
-            brianmwangi@email.com
+            {user?.email ?? ""}
           </ThemedText>
+          {user?.phone_number ? (
+            <ThemedText style={{ opacity: 0.5, fontSize: 13 }}>
+              {user.phone_number}
+            </ThemedText>
+          ) : null}
         </View>
       </View>
 
@@ -163,7 +181,7 @@ export default function Profile() {
           <ThemedText style={styles.linkText}>Terms & Privacy</ThemedText>
         </Pressable>
         <Pressable
-          onPress={() => {}}
+          onPress={handleLogout}
           style={styles.linkBtn}
           accessibilityRole="button"
         >
@@ -210,6 +228,16 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 999,
+  },
+  avatarFallback: {
+    backgroundColor: "#FF6F00",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarInitials: {
+    color: "#FFF",
+    fontSize: 22,
+    fontWeight: "700",
   },
 
   /* Sections */

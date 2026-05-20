@@ -1,7 +1,9 @@
 // services/apiClient.ts
 import axios, { AxiosError } from "axios";
 import Constants from "expo-constants";
+import { router } from "expo-router";
 import { Platform } from "react-native";
+import { useAuthStore } from "@/store/authStore";
 
 const getBaseUrl = () => {
   // 1. Priorité absolue à la variable d'environnement si elle existe
@@ -37,9 +39,13 @@ const api = axios.create({
   timeout: 120000, // 120s — AI pipeline (Whisper + GPT + OTP + TTS) can take up to 90s
 });
 
-// --- REQUEST LOGGER ---
+// --- REQUEST: attach Bearer token + logger ---
 api.interceptors.request.use(
   async (config) => {
+    const token = useAuthStore.getState().token;
+    if (token && !config.headers["Authorization"]) {
+      config.headers["Authorization"] = `Bearer ${token}`;
+    }
     if (__DEV__) {
       console.log(
         `[REQ: ${config.method?.toUpperCase()}] ${config.url}`,
@@ -54,7 +60,7 @@ api.interceptors.request.use(
   },
 );
 
-// --- RESPONSE LOGGER & ERROR HANDLER ---
+// --- RESPONSE: logger + 401 handler ---
 api.interceptors.response.use(
   (response) => {
     if (__DEV__) {
@@ -63,6 +69,11 @@ api.interceptors.response.use(
     return response;
   },
   async (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      await useAuthStore.getState().logout();
+      router.replace("/(auth)/login");
+    }
+
     if (error.response) {
       console.error(
         `[${error.response.status}] API Error:`,

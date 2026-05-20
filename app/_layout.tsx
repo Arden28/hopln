@@ -8,13 +8,15 @@ const qc = new QueryClient();
 
 export default function RootLayout() {
   const [loaded] = useFonts({ Inter_400Regular, Inter_600SemiBold, Inter_700Bold });
-  if (!loaded) return <View style={{ flex: 1, backgroundColor: "white" }} />;
+  if (!loaded) return <View style={{ flex: 1, backgroundColor: "#0A0A0A" }} />;
 
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={qc}>
         <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(tabs)" />
         </Stack>
       </QueryClientProvider>
     </SafeAreaProvider>

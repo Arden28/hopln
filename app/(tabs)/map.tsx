@@ -20,7 +20,7 @@ import mapStyle from "@/lib/map_style.json";
 
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline } from "react-native-maps";
 
 const ORANGE = "#FF6F00";
@@ -55,6 +55,32 @@ function StopNodeMarker({ color }: { color: string }) {
       shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 8,
     }}>
       <Image source={require("@/assets/images/matatu.png")} style={{ width: 16, height: 16 }} resizeMode="contain" />
+    </View>
+  );
+}
+
+// Destination pin: dark label callout above the rounded square
+function DestinationPin({ name }: { name: string }) {
+  return (
+    <View style={{ alignItems: "center" }}>
+      <View style={{
+        backgroundColor: "#1C1C1E",
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 10,
+        maxWidth: 160,
+        marginBottom: 5,
+        shadowColor: "#000",
+        shadowOpacity: 0.22,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 5,
+      }}>
+        <Text numberOfLines={1} style={{ color: "#FFFFFF", fontSize: 11, fontWeight: "700", letterSpacing: 0.2 }}>
+          {name}
+        </Text>
+      </View>
+      <SquarePin isStart={false} />
     </View>
   );
 }
@@ -386,7 +412,7 @@ export default function MapScreen() {
         showsUserLocation={!!me}
         showsMyLocationButton={false}
         showsCompass={false}
-        showsBuildings={false}
+        showsBuildings={true}
         onRegionChangeComplete={onRegionChangeComplete}
         customMapStyle={mapStyle}
       >
@@ -432,9 +458,9 @@ export default function MapScreen() {
             key={m.id}
             coordinate={m.coord}
             tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 0.5 }}
+            anchor={m.isStart ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 0.8 }}
           >
-            <SquarePin isStart={m.isStart} />
+            {m.isStart ? <SquarePin isStart /> : <DestinationPin name={m.name} />}
           </Marker>
         ))}
 
