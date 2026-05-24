@@ -19,6 +19,7 @@ interface AuthState {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  avatarTs: number;
   setAuth: (user: AuthUser, token: string) => Promise<void>;
   setUser: (user: AuthUser) => void;
   logout: () => Promise<void>;
@@ -30,17 +31,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   token: null,
   isAuthenticated: false,
   isLoading: true,
+  avatarTs: 0,
 
   setAuth: async (user, token) => {
     await SecureStore.setItemAsync(TOKEN_KEY, token);
-    set({ user, token, isAuthenticated: true });
+    set({ user, token, isAuthenticated: true, avatarTs: Date.now() });
   },
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => set((prev) => ({
+    user,
+    avatarTs: user.avatar !== prev.user?.avatar ? Date.now() : prev.avatarTs,
+  })),
 
   logout: async () => {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
-    set({ user: null, token: null, isAuthenticated: false });
+    set({ user: null, token: null, isAuthenticated: false, avatarTs: 0 });
   },
 
   initialize: async () => {
@@ -51,7 +56,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
 
-      // Validate token with server
       const response = await api.get("/auth/me", {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -61,10 +65,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         token,
         isAuthenticated: true,
         isLoading: false,
+        avatarTs: Date.now(),
       });
     } catch {
       await SecureStore.deleteItemAsync(TOKEN_KEY);
-      set({ user: null, token: null, isAuthenticated: false, isLoading: false });
+      set({ user: null, token: null, isAuthenticated: false, isLoading: false, avatarTs: 0 });
     }
   },
 }));

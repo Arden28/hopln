@@ -17,6 +17,8 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(account)" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="kwame" options={{ animation: "slide_from_bottom", gestureEnabled: true }} />
         </Stack>
       </QueryClientProvider>
     </SafeAreaProvider>

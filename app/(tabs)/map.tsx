@@ -6,7 +6,6 @@ import RouteStepsList from "@/components/app/RouteStepsList";
 import StopDetailsSheet from "@/components/app/StopDetailsSheet";
 import StopQuickCard from "@/components/app/StopQuickCard";
 import StopsLayer from "@/components/app/StopsLayer";
-import KwameSheet from "@/components/app/KwameSheet";
 
 import { useNavigation } from "@/hooks/useNavigation";
 import { useMapCamera, zoomFromDelta, deltaFromZoom } from "@/hooks/useMapCamera";
@@ -16,15 +15,17 @@ import { StopService } from "@/services/stop";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
 import { RouteInfo, Step, Stop, detectManeuver, getRouteColor, humanizeStep, mToNice, sToMin } from "@/utils/mapHelpers";
 
-import mapStyle from "@/lib/map_style.json";
+import mapStyle     from "@/lib/map_style.json";
+import mapStyleDark from "@/lib/map_style_dark.json";
 
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
+import { useSavedStore } from "@/store/savedStore";
+import { usePrefsStore } from "@/store/prefsStore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, View, useColorScheme } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline } from "react-native-maps";
 
 const ORANGE = "#FF6F00";
-const BG     = "#F6F7F8";
 
 function LocationPin() {
   return (
@@ -118,6 +119,8 @@ interface LocMarker    { id: string; coord: LatLng; name: string; isStart: boole
 
 export default function MapScreen() {
   const router = useRouter();
+  const dark = useColorScheme() === 'dark';
+  const BG = dark ? '#0F0F0F' : '#F6F7F8';
 
   const { location: me, navState, startNavigation, stopNavigation } = useNavigation();
 
@@ -126,6 +129,55 @@ export default function MapScreen() {
   const tripStatus    = useJourneyStore((s) => s.tripStatus);
   const clearJourney  = useJourneyStore((s) => s.clearJourney);
   const navigating    = tripStatus === "IN_TRANSIT";
+
+  const { journeys, addJourney, removeJourney } = useSavedStore();
+  const { prefs, load: loadPrefs } = usePrefsStore();
+  useEffect(() => { loadPrefs(); }, [loadPrefs]);
+
+  const isSaved = useMemo(() =>
+    activeJourney
+      ? journeys.some((j) =>
+          j.from_name === activeJourney.fromLoc.name &&
+          j.to_name   === activeJourney.toLoc.name
+        )
+      : false,
+    [journeys, activeJourney]
+  );
+
+  const savedJourneyId = useMemo(() =>
+    activeJourney
+      ? journeys.find((j) =>
+          j.from_name === activeJourney.fromLoc.name &&
+          j.to_name   === activeJourney.toLoc.name
+        )?.id
+      : undefined,
+    [journeys, activeJourney]
+  );
+
+  const handleSaveJourney = async (label?: string) => {
+    if (!activeJourney) return;
+    const { fromLoc, toLoc, route } = activeJourney;
+    await addJourney({
+      label: label ?? null,
+      from_name: fromLoc.name,
+      from_lat:  fromLoc.lat,
+      from_lng:  fromLoc.lng,
+      from_id:   fromLoc.id ?? null,
+      from_type: fromLoc._type,
+      to_name:   toLoc.name,
+      to_lat:    toLoc.lat,
+      to_lng:    toLoc.lng,
+      to_id:     toLoc.id ?? null,
+      to_type:   toLoc._type,
+      summary:   route.summary,
+      duration:  route.total_duration,
+      route,
+    });
+  };
+
+  const handleUnsaveJourney = async () => {
+    if (savedJourneyId !== undefined) await removeJourney(savedJourneyId);
+  };
 
   const [followMe, setFollowMe]   = useState(true);
   const [selected, setSelected]   = useState<Stop | null>(null);
@@ -147,7 +199,6 @@ export default function MapScreen() {
   // Tapped non-stop location pin
   const [tappedCoord, setTappedCoord] = useState<{ lat: number; lng: number } | null>(null);
 
-  const [kwameOpen, setKwameOpen] = useState(false);
   const chipJustPressedRef = useRef(false);
 
   // Route overlay state — typed arrays instead of GeoJSON FeatureCollections
@@ -209,7 +260,7 @@ export default function MapScreen() {
       center:  { latitude: me.latitude, longitude: me.longitude },
       zoom:    18.0 + (Math.min(me.speed ?? 0, 2.0) / 2.0) * 0.15,
       heading: me.heading ?? navState.routeBearing ?? 0,
-      pitch:   45,
+      pitch:   prefs.navView === "tilted" ? 45 : 0,
       duration: 300,
     });
   }, [me, followMe, navigating, navState, camera]);
@@ -357,34 +408,31 @@ export default function MapScreen() {
     };
 
     try {
-      const routes = await RouteService.calculateJourney(fromLoc, toLoc);
-      if (routes.length > 0) setJourney(fromLoc, toLoc, routes[0]);
+      const routes = await RouteService.calculateJourney(fromLoc, toLoc, prefs.maxWalkMeters);
+      if (routes.length > 0) {
+        setJourney(fromLoc, toLoc, routes[0]);
+      } else {
+        Alert.alert("No route found", "We couldn't find a transit route to this stop right now. Try again later.");
+      }
     } catch (e) {
       console.warn("Failed to calculate route to stop", e);
+      Alert.alert("Error", "Failed to calculate route. Please check your connection.");
+    } finally {
       setRouteLoading(false);
     }
   }, [me, selected, setJourney]);
 
-  const handleAiDeriveJourney = useCallback((aiRouteResponse: any) => {
-    if (!me) return;
-    setSteps([]);
-    setRouteLoading(true);
-
-    const fromLoc: UnifiedLocation = {
-      id: "current_location", name: "Current Location", _type: "location",
-      lat: me.latitude, lng: me.longitude,
-    };
-    const toLoc: UnifiedLocation = {
-      id:    aiRouteResponse.summary,
-      name:  aiRouteResponse.summary.replace("Via ", ""),
-      _type: "location",
-      lat:   aiRouteResponse.segments[aiRouteResponse.segments.length - 1].to.lat,
-      lng:   aiRouteResponse.segments[aiRouteResponse.segments.length - 1].to.lng,
-    };
-
-    setJourney(fromLoc, toLoc, { ...aiRouteResponse, is_ai_derived: true });
-    setTimeout(() => startNavigation(), 300);
-  }, [me, setJourney, startNavigation]);
+  // Auto-start navigation when Kwame sets an AI-derived journey from its own screen
+  const prevJourneyRouteRef = useRef<any>(null);
+  useEffect(() => {
+    if (!activeJourney) { prevJourneyRouteRef.current = null; return; }
+    if (activeJourney.route === prevJourneyRouteRef.current) return;
+    prevJourneyRouteRef.current = activeJourney.route;
+    if (activeJourney.route.is_ai_derived) {
+      setFollowMe(true);
+      setTimeout(() => startNavigation(), 300);
+    }
+  }, [activeJourney, startNavigation]);
 
   const handleToggleNav = useCallback((nextState: boolean) => {
     if (nextState) { startNavigation(); setFollowMe(true); }
@@ -400,7 +448,7 @@ export default function MapScreen() {
   }, []);
 
   const nextStep    = steps[navState?.stepIndex ?? 0];
-  const nextPreview = nextStep ? humanizeStep(nextStep) : null;
+  const nextPreview = prefs.navHints === "off" || !nextStep ? null : humanizeStep(nextStep);
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
@@ -414,7 +462,7 @@ export default function MapScreen() {
         showsCompass={false}
         showsBuildings={true}
         onRegionChangeComplete={onRegionChangeComplete}
-        customMapStyle={mapStyle}
+        customMapStyle={dark ? mapStyleDark : mapStyle}
       >
         {/* Walking route legs — dashed grey, below transit */}
         {walkLegs.map((leg) => (
@@ -503,11 +551,12 @@ export default function MapScreen() {
           if (chipJustPressedRef.current) { chipJustPressedRef.current = false; return; }
           router.push("/search");
         }}
-        onOpenKwame={() => { chipJustPressedRef.current = true; setNearestOpen(false); setKwameOpen(true); }}
+        onOpenKwame={() => { chipJustPressedRef.current = true; setNearestOpen(false); router.push("/kwame"); }}
         navigating={navigating}
         onToggleNav={() => handleToggleNav(!navigating)}
         nextPreview={nextPreview}
         nextStep={nextStep}
+        showNavSub={prefs.navHints === "detailed"}
         eta={navState?.eta ?? null}
         remainingDistanceM={navState?.remainingDistanceM ?? null}
         arrivalSoonShown={navState?.status === "arrived"}
@@ -520,14 +569,8 @@ export default function MapScreen() {
         }
       />
 
-      <KwameSheet
-        open={kwameOpen}
-        onClose={() => setKwameOpen(false)}
-        me={me}
-        onStartJourney={handleAiDeriveJourney}
-      />
 
-      {!selected && !activeJourney && (
+{!selected && !activeJourney && (
         <NearestStopsSheet nearestOpen={nearestOpen} setNearestOpen={setNearestOpen} nearest={nearestStops} me={me} onSelect={handleSelectStop} />
       )}
 
@@ -549,7 +592,7 @@ export default function MapScreen() {
       )}
 
       {activeJourney && (
-        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin}>
+        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin} isSaved={isSaved} onSave={handleSaveJourney} onUnsave={handleUnsaveJourney}>
           <RouteStepsList steps={steps} stepsOpen={stepsOpen} setStepsOpen={setStepsOpen} nextPreview={nextPreview} nextStepIdx={navState?.stepIndex ?? 0} navigating={navigating} selectedName={activeJourney.toLoc.name} />
         </JourneyDetailsSheet>
       )}

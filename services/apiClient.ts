@@ -69,12 +69,14 @@ api.interceptors.response.use(
     return response;
   },
   async (error: AxiosError) => {
-    if (error.response?.status === 401) {
+    const isLogoutEndpoint = error.config?.url?.includes("/auth/logout");
+
+    if (error.response?.status === 401 && !isLogoutEndpoint) {
       await useAuthStore.getState().logout();
       router.replace("/(auth)/login");
     }
 
-    if (error.response) {
+    if (error.response && !(isLogoutEndpoint && error.response.status === 401)) {
       console.error(
         `[${error.response.status}] API Error:`,
         error.response.data,
@@ -89,10 +91,10 @@ api.interceptors.response.use(
     }
 
     const customError = {
-      message:
-        (error.response?.data as any)?.message || "Server connection error",
-      status: error.response?.status,
-      errors: (error.response?.data as any)?.errors,
+      message: (error.response?.data as any)?.message || "Server connection error",
+      status:  error.response?.status,
+      errors:  (error.response?.data as any)?.errors,
+      data:    error.response?.data as any,
     };
 
     return Promise.reject(customError);

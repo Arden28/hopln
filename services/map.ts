@@ -38,6 +38,23 @@ export const MapService = {
     }
   },
 
+  async reverseGeocode(
+    lat: number,
+    lng: number,
+  ): Promise<string> {
+    const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "";
+    try {
+      const res = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?types=place,locality,neighborhood,address,poi&language=en&access_token=${token}`,
+      );
+      const json = await res.json();
+      const first = json.features?.[0];
+      return first?.text ?? first?.place_name?.split(",")[0] ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    } catch {
+      return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+  },
+
   async getPlaceDetails(
     placeId: string,
   ): Promise<{ lat: number; lng: number; name: string } | null> {

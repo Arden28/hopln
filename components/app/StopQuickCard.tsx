@@ -1,7 +1,7 @@
 // components/app/StopQuickCard.tsx
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef } from "react";
-import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
@@ -29,6 +29,14 @@ function parseRoutes(raw: string | null | undefined): string[] {
 export default function StopQuickCard({ stop, onClose, onGoToStop, onViewDetails, loading = false }: Props) {
   const insets     = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(120)).current;
+  const dark       = useColorScheme() === "dark";
+  const C = {
+    bg:         dark ? "#1C1C1E" : WHITE,
+    text:       dark ? "#FFFFFF" : BLACK,
+    light:      dark ? "#2C2C2E" : LIGHT,
+    border:     dark ? "#2C2C2E" : BORDER,
+    softOrange: dark ? "rgba(255,111,0,0.18)" : "#FFF3E0",
+  };
 
   useEffect(() => {
     Animated.spring(translateY, {
@@ -50,22 +58,22 @@ export default function StopQuickCard({ stop, onClose, onGoToStop, onViewDetails
     <Animated.View
       style={[
         s.card,
-        { bottom: (insets.bottom || 0) + 12 },
+        { bottom: (insets.bottom || 0) + 12, backgroundColor: C.bg },
         { transform: [{ translateY }] },
       ]}
     >
       {/* Header row */}
       <View style={s.header}>
-        <View style={s.iconBox}>
+        <View style={[s.iconBox, { backgroundColor: C.softOrange }]}>
           <Ionicons name="bus" size={18} color={ORANGE} />
         </View>
 
         <View style={{ flex: 1 }}>
-          <Text style={s.name} numberOfLines={2}>{stop.name}</Text>
+          <Text style={[s.name, { color: C.text }]} numberOfLines={2}>{stop.name}</Text>
           <Text style={s.coords}>{lat}, {lng}</Text>
         </View>
 
-        <Pressable onPress={handleClose} hitSlop={14} style={s.closeBtn}>
+        <Pressable onPress={handleClose} hitSlop={14} style={[s.closeBtn, { backgroundColor: C.light }]}>
           <Ionicons name="close" size={15} color={GREY} />
         </Pressable>
       </View>
@@ -74,15 +82,15 @@ export default function StopQuickCard({ stop, onClose, onGoToStop, onViewDetails
       {routes.length > 0 && (
         <View style={s.badgesRow}>
           {routes.map((r) => (
-            <View key={r} style={s.badge}>
-              <Text style={s.badgeText}>{r}</Text>
+            <View key={r} style={[s.badge, { borderColor: C.border }]}>
+              <Text style={[s.badgeText, { color: C.text }]}>{r}</Text>
             </View>
           ))}
         </View>
       )}
 
       {/* Divider */}
-      <View style={s.divider} />
+      <View style={[s.divider, { backgroundColor: C.border }]} />
 
       {/* Action buttons */}
       <View style={s.actions}>
@@ -108,7 +116,7 @@ export default function StopQuickCard({ stop, onClose, onGoToStop, onViewDetails
         </Pressable>
 
         <Pressable
-          style={({ pressed }) => [s.secondaryBtn, { opacity: pressed ? 0.7 : 1 }]}
+          style={({ pressed }) => [s.secondaryBtn, { borderColor: C.border, opacity: pressed ? 0.7 : 1 }]}
           onPress={onViewDetails}
         >
           <Text style={s.secondaryText}>View details</Text>
@@ -121,116 +129,90 @@ export default function StopQuickCard({ stop, onClose, onGoToStop, onViewDetails
 
 const s = StyleSheet.create({
   card: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    backgroundColor: WHITE,
-    borderRadius: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
+    position:         "absolute",
+    left:             16,
+    right:            16,
+    borderRadius:     20,
+    paddingTop:       16,
+    paddingBottom:    12,
     paddingHorizontal: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.13,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 12,
+    shadowColor:      "#000",
+    shadowOpacity:    0.13,
+    shadowRadius:     18,
+    shadowOffset:     { width: 0, height: 6 },
+    elevation:        12,
   },
 
   header: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 10,
+    alignItems:    "flex-start",
+    gap:           12,
+    marginBottom:  10,
   },
   iconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    backgroundColor: "#FFF3E0",
-    alignItems: "center",
+    width:          38,
+    height:         38,
+    borderRadius:   11,
+    alignItems:     "center",
     justifyContent: "center",
-    flexShrink: 0,
+    flexShrink:     0,
   },
   name: {
-    fontSize: 15,
+    fontSize:   15,
     fontWeight: "700",
-    color: BLACK,
     lineHeight: 20,
   },
-  coords: {
-    fontSize: 12,
-    color: GREY,
-    marginTop: 2,
-  },
+  coords: { fontSize: 12, color: GREY, marginTop: 2 },
   closeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: LIGHT,
-    alignItems: "center",
+    width:          28,
+    height:         28,
+    borderRadius:   14,
+    alignItems:     "center",
     justifyContent: "center",
-    flexShrink: 0,
-    marginTop: 2,
+    flexShrink:     0,
+    marginTop:      2,
   },
 
   badgesRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 12,
+    flexWrap:      "wrap",
+    gap:           6,
+    marginBottom:  12,
   },
   badge: {
-    borderWidth: 1.5,
-    borderColor: BORDER,
-    borderRadius: 6,
+    borderWidth:      1.5,
+    borderRadius:     6,
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical:  3,
   },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: BLACK,
-  },
+  badgeText: { fontSize: 11, fontWeight: "700" },
 
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: BORDER,
-    marginBottom: 12,
-  },
+  divider: { height: StyleSheet.hairlineWidth, marginBottom: 12 },
 
   actions: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    alignItems:    "center",
+    gap:           10,
   },
   primaryBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
+    flex:           1,
+    flexDirection:  "row",
+    alignItems:     "center",
     justifyContent: "center",
-    gap: 7,
+    gap:            7,
     backgroundColor: ORANGE,
-    borderRadius: 99,
+    borderRadius:   99,
     paddingVertical: 13,
   },
-  primaryText: {
-    color: WHITE,
-    fontSize: 14,
-    fontWeight: "700",
-  },
+  primaryText: { color: WHITE, fontSize: 14, fontWeight: "700" },
   secondaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
+    flexDirection:  "row",
+    alignItems:     "center",
+    gap:            3,
     paddingVertical: 13,
     paddingHorizontal: 14,
-    borderRadius: 99,
-    borderWidth: 1.5,
-    borderColor: BORDER,
+    borderRadius:   99,
+    borderWidth:    1.5,
   },
-  secondaryText: {
-    color: ORANGE,
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  secondaryText: { color: ORANGE, fontSize: 14, fontWeight: "600" },
 });

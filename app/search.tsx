@@ -1,74 +1,114 @@
-// app/(tabs)/search.tsx
+// app/search.tsx
 import { useStopSearch } from "@/hooks/useStopSearch";
-import { RouteService,  type Route } from "@/services/route";
+import { MapService, type PlacePrediction } from "@/services/map";
+import { RouteService, type Route } from "@/services/route";
+import { useSavedStore } from "@/store/savedStore";
+import { usePrefsStore } from "@/store/prefsStore";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
-import * as Location from "expo-location";
-
+import { getRouteColor } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   FlatList,
+  Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { MapService, type PlacePrediction } from "@/services/map";
-import {
-  getRouteColor,
-} from "@/utils/mapHelpers";
-
-const COLORS = {
-  background: "#FFFFFF",
-  card: "#F2F2F7",
-  text: "#000000",
-  subtext: "#8E8E93",
-  border: "#E5E5EA",
-  primary: "#FF6F00",
-  blue: "#007AFF",
-  grey: "#8E8E93",
-};
-
+const ORANGE = "#FF6F00";
+const BLUE   = "#007AFF";
+const GREY   = "#8E8E93";
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 
 type Field = "from" | "to";
 
-export default function SearchScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
+function makeC(dark: boolean) {
+  return {
+    bg:       dark ? "#0F0F0F" : "#FFFFFF",
+    card:     dark ? "#1C1C1E" : "#F2F2F7",
+    sheet:    dark ? "#1C1C1E" : "#FFFFFF",
+    text:     dark ? "#FFFFFF" : "#000000",
+    sub:      dark ? "#8E8E93" : "#8E8E93",
+    border:   dark ? "#2C2C2E" : "#E5E5EA",
+    handle:   dark ? "#3A3A3C" : "#D1D5DB",
+    input:    dark ? "#0F0F0F" : "#FFFFFF",
+    iconBg:   dark ? "#2C2C2E" : "#F2F2F7",
+    pressed:  dark ? "#2C2C2E" : "#E5E5EA",
+    hairline: dark ? "#2C2C2E" : "#E5E5EA",
+    routeCard:dark ? "#1C1C1E" : "#F2F2F7",
+  };
+}
 
+const DEFAULT_LISTS = [
+  { key: "favorites",    label: "Favorites"    },
+  { key: "want_to_go",   label: "Want to go"   },
+  { key: "travel_plans", label: "Travel plans"  },
+  { key: "labeled",      label: "Labeled"       },
+] as const;
+
+export default function SearchScreen() {
+  const router      = useRouter();
+  const insets      = useSafeAreaInsets();
+  const dark        = useColorScheme() === "dark";
+  const C           = makeC(dark);
+
+  // ── Journey state ────────────────────────────────────────────────────────────
   const [currentLocation, setCurrentLocation] = useState<UnifiedLocation | null>(null);
   const [fromQ, setFromQ] = useState("");
-  const [toQ, setToQ] = useState("");
-
+  const [toQ, setToQ]     = useState("");
   const [fromLoc, setFromLoc] = useState<UnifiedLocation | null>(null);
-  const [toLoc, setToLoc] = useState<UnifiedLocation | null>(null);
-
-  const setJourney = useJourneyStore((state) => state.setJourney);
+  const [toLoc, setToLoc]     = useState<UnifiedLocation | null>(null);
+  const setJourney = useJourneyStore((s) => s.setJourney);
 
   const [focusedField, setFocusedField] = useState<Field>("to");
   const toInputRef = useRef<TextInput>(null);
 
-  const activeQuery = focusedField === "from" ? fromQ : toQ;
-  const { stops, places, recents, pushRecent, isSearchingStops, isSearchingPlaces } =
-    useStopSearch(
-      activeQuery,
-      currentLocation ? { latitude: currentLocation.lat, longitude: currentLocation.lng } : null,
-    );
+  // ── Saved store (home / work / custom lists) ─────────────────────────────────
+  const { places: savedPlaces, addPlace, customLists, fetch: fetchSaved } = useSavedStore();
+  useEffect(() => { fetchSaved().catch(() => {}); }, [fetchSaved]);
+  const { prefs, load: loadPrefs } = usePrefsStore();
+  useEffect(() => { loadPrefs(); }, [loadPrefs]);
 
-  const sheetAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const homePlace = savedPlaces.find((p) => p.pin === "home");
+  const workPlace = savedPlaces.find((p) => p.pin === "work");
+
+  const isSaved = (loc: UnifiedLocation) =>
+    savedPlaces.some((p) => p.place_id === loc.id && p.pin === null);
+
+  // ── Search ────────────────────────────────────────────────────────────────────
+  const activeQuery = focusedField === "from" ? fromQ : toQ;
+  const {
+    stops,
+    places: placeResults,
+    recents,
+    pushRecent,
+    isSearchingStops,
+    isSearchingPlaces,
+  } = useStopSearch(
+    activeQuery,
+    currentLocation ? { latitude: currentLocation.lat, longitude: currentLocation.lng } : null,
+  );
+
+  // ── Route sheet ───────────────────────────────────────────────────────────────
+  const sheetAnim         = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
-  const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
+  const [availableRoutes, setAvailableRoutes]   = useState<Route[]>([]);
   const [isFetchingRoutes, setIsFetchingRoutes] = useState(false);
 
+  // Current location permission
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -76,39 +116,30 @@ export default function SearchScreen() {
         const pos = await Location.getCurrentPositionAsync({});
         setCurrentLocation({
           _type: "location",
-          id: "current_location",
-          name: "Current Location",
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
+          id:    "current_location",
+          name:  "Current Location",
+          lat:   pos.coords.latitude,
+          lng:   pos.coords.longitude,
         });
       }
     })();
   }, []);
 
+  // Route fetching + keyboard dismiss
   useEffect(() => {
     if (fromLoc && toLoc) {
+      Keyboard.dismiss();
       Animated.spring(sheetAnim, {
         toValue: 0,
         useNativeDriver: true,
         damping: 20,
         stiffness: 90,
       }).start();
-
       setIsFetchingRoutes(true);
-
-      const fetchRoutes = async () => {
-        try {
-          const routes = await RouteService.calculateJourney(fromLoc, toLoc);
-          setAvailableRoutes(routes);
-        } catch (error) {
-          console.error("Failed to fetch routes:", error);
-          setAvailableRoutes([]);
-        } finally {
-          setIsFetchingRoutes(false);
-        }
-      };
-
-      fetchRoutes();
+      RouteService.calculateJourney(fromLoc, toLoc, prefs.maxWalkMeters)
+        .then(setAvailableRoutes)
+        .catch(() => setAvailableRoutes([]))
+        .finally(() => setIsFetchingRoutes(false));
     } else {
       Animated.timing(sheetAnim, {
         toValue: SCREEN_HEIGHT,
@@ -119,21 +150,86 @@ export default function SearchScreen() {
     }
   }, [fromLoc, toLoc, sheetAnim]);
 
+  // ── Save recent to list ───────────────────────────────────────────────────────
+  const saveToList = (loc: UnifiedLocation, listKey: string) => {
+    addPlace({
+      name:     loc.name,
+      lat:      loc.lat,
+      lng:      loc.lng,
+      type:     loc._type,
+      place_id: loc.id ?? null,
+      pin:      null,
+      list:     listKey,
+      category: loc._type === "stop" ? "Transit stop" : null,
+      note:     null,
+    }).catch(() => Alert.alert("Error", "Could not save this place."));
+  };
+
+  const showSavePicker = (loc: UnifiedLocation) => {
+    const allLists = [
+      ...DEFAULT_LISTS,
+      ...customLists.map((l) => ({ key: l, label: l })),
+    ];
+    Alert.alert(
+      "Save to list",
+      loc.name,
+      [
+        ...allLists.map((l) => ({ text: l.label, onPress: () => saveToList(loc, l.key) })),
+        { text: "Cancel", style: "cancel" as const },
+      ],
+    );
+  };
+
+  // ── List rows ─────────────────────────────────────────────────────────────────
   const data = useMemo(() => {
     const rows: any[] = [];
 
-    if (focusedField === "from" && currentLocation) {
-      rows.push({ _type: "current-location", location: currentLocation, key: "current-location" });
-    }
+    if (!activeQuery) {
+      // Current location (from field only)
+      if (focusedField === "from" && currentLocation) {
+        rows.push({ _type: "current-location", location: currentLocation, key: "current-location" });
+      }
 
-    if (!activeQuery && recents.length > 0) {
-      rows.push({ _type: "header", title: "Recent", key: "hdr-recent" });
-      for (const r of recents)
-        rows.push({ _type: "recent", location: r, key: `recent-${r.id}` });
+      // Home address (both fields)
+      if (homePlace) {
+        rows.push({
+          _type: "home-address",
+          key:   "home-address",
+          location: {
+            _type: "location" as const,
+            id:    `home_${homePlace.id}`,
+            name:  homePlace.name,
+            lat:   homePlace.lat,
+            lng:   homePlace.lng,
+          } as UnifiedLocation,
+        });
+      }
+
+      // Work address (both fields)
+      if (workPlace) {
+        rows.push({
+          _type: "work-address",
+          key:   "work-address",
+          location: {
+            _type: "location" as const,
+            id:    `work_${workPlace.id}`,
+            name:  workPlace.name,
+            lat:   workPlace.lat,
+            lng:   workPlace.lng,
+          } as UnifiedLocation,
+        });
+      }
+
+      // Recents
+      if (recents.length > 0) {
+        rows.push({ _type: "header", title: "Recent", key: "hdr-recent" });
+        for (const r of recents)
+          rows.push({ _type: "recent", location: r, key: `recent-${r.id}` });
+      }
     }
 
     if (activeQuery) {
-      // Transit Stops section
+      // Transit stops
       if (stops.length > 0 || isSearchingStops) {
         rows.push({ _type: "header", title: "Transit Stops", key: "hdr-stops" });
         if (isSearchingStops) {
@@ -144,29 +240,31 @@ export default function SearchScreen() {
         }
       }
 
-      // Places section
-      if (places.length > 0 || isSearchingPlaces) {
+      // Places
+      if (placeResults.length > 0 || isSearchingPlaces) {
         rows.push({ _type: "header", title: "Places", key: "hdr-places" });
         if (isSearchingPlaces) {
           rows.push({ _type: "places-loading", key: "places-loading" });
         } else {
-          for (const p of places)
+          for (const p of placeResults)
             rows.push({ _type: "place-item", place: p, key: `place-${p.place_id}` });
         }
       }
 
-      // No results from either source
-      if (!isSearchingStops && !isSearchingPlaces && stops.length === 0 && places.length === 0) {
+      if (!isSearchingStops && !isSearchingPlaces && stops.length === 0 && placeResults.length === 0) {
         rows.push({ _type: "header", title: "No places found", key: "hdr-empty" });
       }
     }
 
     return rows;
-  }, [activeQuery, stops, places, isSearchingStops, isSearchingPlaces, recents, focusedField, currentLocation]);
+  }, [
+    activeQuery, stops, placeResults, isSearchingStops, isSearchingPlaces,
+    recents, focusedField, currentLocation, homePlace, workPlace,
+  ]);
 
+  // ── Select handlers ───────────────────────────────────────────────────────────
   function onSelectLocation(loc: UnifiedLocation) {
     pushRecent(loc);
-
     if (focusedField === "from") {
       setFromLoc(loc);
       setFromQ(loc.name);
@@ -202,302 +300,349 @@ export default function SearchScreen() {
   }
 
   function swapFields() {
-    const tempQ = fromQ;
-    setFromQ(toQ);
-    setToQ(tempQ);
-
-    const tempLoc = fromLoc;
-    setFromLoc(toLoc);
-    setToLoc(tempLoc);
+    setFromQ(toQ);    setToQ(fromQ);
+    setFromLoc(toLoc); setToLoc(fromLoc);
   }
 
+  // ── Header bar ────────────────────────────────────────────────────────────────
   const HeaderBar = (
-    <View style={[styles.headerContainer, { paddingTop: Math.max(insets.top, 16) }]}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={() => router.back()} hitSlop={15} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={26} color={COLORS.text} />
+    <View style={[s.headerContainer, { paddingTop: Math.max(insets.top, 16), backgroundColor: C.bg, borderBottomColor: C.hairline }]}>
+      <View style={s.headerRow}>
+        <Pressable onPress={() => router.back()} hitSlop={15} style={s.backBtn}>
+          <Ionicons name="chevron-back" size={26} color={C.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Plan Route</Text>
+        <Text style={[s.headerTitle, { color: C.text }]}>Plan Route</Text>
         <View style={{ width: 26 }} />
       </View>
 
-      <View style={styles.routeCard}>
-        <View style={styles.timeline}>
-          <View style={styles.dotFrom} />
-          <View style={styles.line} />
-          <View style={styles.squareTo} />
+      <View style={[s.routeCard, { backgroundColor: C.routeCard }]}>
+        <View style={s.timeline}>
+          <View style={[s.dotFrom, { backgroundColor: C.sub }]} />
+          <View style={[s.line, { backgroundColor: C.border }]} />
+          <View style={[s.squareTo, { backgroundColor: C.text }]} />
         </View>
 
-        <View style={styles.inputStack}>
-          <View style={styles.inputWrapper}>
+        <View style={s.inputStack}>
+          <View style={s.inputWrapper}>
             <TextInput
               value={fromQ}
-              onChangeText={(txt) => {
-                setFromQ(txt);
-                setFromLoc(null);
-              }}
+              onChangeText={(txt) => { setFromQ(txt); setFromLoc(null); }}
               onFocus={() => setFocusedField("from")}
-              placeholder="Current Location"
-              placeholderTextColor={COLORS.blue}
-              style={[styles.input, focusedField === "from" && styles.inputFocused]}
+              placeholder="From…"
+              placeholderTextColor={BLUE}
+              style={[s.input, { color: C.text }]}
               returnKeyType="next"
               onSubmitEditing={() => toInputRef.current?.focus()}
             />
             {fromQ.length > 0 && focusedField === "from" && (
               <Pressable
-                onPress={() => {
-                  setFromQ("");
-                  setFromLoc(null);
-                }}
+                onPress={() => { setFromQ(""); setFromLoc(null); }}
                 hitSlop={10}
-                style={styles.clearBtn}
+                style={s.clearBtn}
               >
-                <Ionicons name="close-circle" size={16} color={COLORS.subtext} />
+                <Ionicons name="close-circle" size={16} color={C.sub} />
               </Pressable>
             )}
           </View>
 
-          <View style={styles.divider} />
+          <View style={[s.divider, { backgroundColor: C.border }]} />
 
-          <View style={styles.inputWrapper}>
+          <View style={s.inputWrapper}>
             <TextInput
               ref={toInputRef}
               autoFocus
               value={toQ}
-              onChangeText={(txt) => {
-                setToQ(txt);
-                setToLoc(null);
-              }}
+              onChangeText={(txt) => { setToQ(txt); setToLoc(null); }}
               onFocus={() => setFocusedField("to")}
               placeholder="Where to?"
-              placeholderTextColor={COLORS.subtext}
-              style={[styles.input, focusedField === "to" && styles.inputFocused]}
+              placeholderTextColor={C.sub}
+              style={[s.input, { color: C.text }]}
               returnKeyType="search"
             />
             {toQ.length > 0 && focusedField === "to" && (
               <Pressable
-                onPress={() => {
-                  setToQ("");
-                  setToLoc(null);
-                }}
+                onPress={() => { setToQ(""); setToLoc(null); }}
                 hitSlop={10}
-                style={styles.clearBtn}
+                style={s.clearBtn}
               >
-                <Ionicons name="close-circle" size={16} color={COLORS.subtext} />
+                <Ionicons name="close-circle" size={16} color={C.sub} />
               </Pressable>
             )}
           </View>
         </View>
 
-        <Pressable onPress={swapFields} style={styles.swapBtn} hitSlop={10}>
-          <Ionicons name="swap-vertical" size={20} color={COLORS.subtext} />
+        <Pressable onPress={swapFields} style={s.swapBtn} hitSlop={10}>
+          <Ionicons name="swap-vertical" size={20} color={C.sub} />
         </Pressable>
       </View>
     </View>
   );
 
+  // ── Row renderer ─────────────────────────────────────────────────────────────
+  const renderItem = ({ item }: { item: any }) => {
+
+    // Loading skeletons
+    if (item._type === "stops-loading" || item._type === "places-loading") {
+      return (
+        <View style={[s.loadingRow, { borderBottomColor: C.hairline }]}>
+          <ActivityIndicator size="small" color={C.sub} />
+          <Text style={[s.loadingText, { color: C.sub }]}>Searching…</Text>
+        </View>
+      );
+    }
+
+    // Section header
+    if (item._type === "header") {
+      return <Text style={[s.sectionTitle, { color: C.sub }]}>{item.title}</Text>;
+    }
+
+    // Current location
+    if (item._type === "current-location") {
+      return (
+        <Pressable
+          onPress={() => onSelectLocation(item.location)}
+          style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent", borderBottomColor: C.hairline }]}
+        >
+          <View style={[s.iconWrap, { backgroundColor: BLUE }]}>
+            <Ionicons name="locate" size={18} color="#FFF" />
+          </View>
+          <View style={s.rowBody}>
+            <Text style={[s.rowTitle, { color: C.text }]}>{item.location.name}</Text>
+            <Text style={[s.rowSub, { color: C.sub }]}>Use my current location</Text>
+          </View>
+        </Pressable>
+      );
+    }
+
+    // Home address
+    if (item._type === "home-address") {
+      return (
+        <Pressable
+          onPress={() => onSelectLocation(item.location)}
+          style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent", borderBottomColor: C.hairline }]}
+        >
+          <View style={[s.iconWrap, { backgroundColor: ORANGE + "22" }]}>
+            <Ionicons name="home" size={18} color={ORANGE} />
+          </View>
+          <View style={s.rowBody}>
+            <Text style={[s.rowTitle, { color: C.text }]}>Home</Text>
+            <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{item.location.name}</Text>
+          </View>
+        </Pressable>
+      );
+    }
+
+    // Work address
+    if (item._type === "work-address") {
+      return (
+        <Pressable
+          onPress={() => onSelectLocation(item.location)}
+          style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent", borderBottomColor: C.hairline }]}
+        >
+          <View style={[s.iconWrap, { backgroundColor: "#3B82F622" }]}>
+            <Ionicons name="briefcase" size={18} color="#3B82F6" />
+          </View>
+          <View style={s.rowBody}>
+            <Text style={[s.rowTitle, { color: C.text }]}>Work</Text>
+            <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{item.location.name}</Text>
+          </View>
+        </Pressable>
+      );
+    }
+
+    // Place result (Mapbox prediction)
+    if (item._type === "place-item") {
+      const pred = item.place as PlacePrediction;
+      const isResolving = resolvingPlaceId === pred.place_id;
+      return (
+        <Pressable
+          onPress={() => onSelectPlace(pred)}
+          disabled={isResolving}
+          style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent", borderBottomColor: C.hairline }]}
+        >
+          <View style={[s.iconWrap, { backgroundColor: C.iconBg }]}>
+            {isResolving
+              ? <ActivityIndicator size="small" color={ORANGE} />
+              : <Ionicons name="location-outline" size={18} color={C.text} />
+            }
+          </View>
+          <View style={s.rowBody}>
+            <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{pred.main_text}</Text>
+            {pred.secondary_text ? (
+              <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{pred.secondary_text}</Text>
+            ) : null}
+          </View>
+        </Pressable>
+      );
+    }
+
+    // Stop item
+    if (item._type === "stop-item") {
+      const loc = item.location as UnifiedLocation;
+      return (
+        <Pressable
+          onPress={() => onSelectLocation(loc)}
+          style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent", borderBottomColor: C.hairline }]}
+        >
+          <View style={[s.iconWrap, { backgroundColor: ORANGE + "18" }]}>
+            <Ionicons name="bus-outline" size={18} color={ORANGE} />
+          </View>
+          <View style={s.rowBody}>
+            <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{loc.name}</Text>
+            {loc.route_nams ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                pointerEvents="none"
+                style={{ marginTop: 4 }}
+                contentContainerStyle={{ gap: 4, alignItems: "center" }}
+              >
+                {loc.route_nams.split(",").map((name, i) => {
+                  const n = name.trim();
+                  const bc = getRouteColor(n);
+                  return (
+                    <View key={i} style={[s.routeBadge, { backgroundColor: bc + "15", borderColor: bc + "30" }]}>
+                      <Text style={[s.routeBadgeText, { color: bc }]}>{n}</Text>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+          </View>
+        </Pressable>
+      );
+    }
+
+    // Recent row
+    if (item._type === "recent") {
+      const loc = item.location as UnifiedLocation;
+      const saved = isSaved(loc);
+      const iconName = loc._type === "stop" ? "bus-outline" : "location-outline";
+      return (
+        <Pressable
+          onPress={() => onSelectLocation(loc)}
+          style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : "transparent", borderBottomColor: C.hairline }]}
+        >
+          <View style={[s.iconWrap, { backgroundColor: C.iconBg }]}>
+            <Ionicons name="time-outline" size={18} color={C.sub} />
+          </View>
+          <View style={s.rowBody}>
+            <Text style={[s.rowTitle, { color: C.text }]} numberOfLines={1}>{loc.name}</Text>
+            {loc._type === "stop" && loc.route_nams ? (
+              <Text style={[s.rowSub, { color: C.sub }]} numberOfLines={1}>{loc.route_nams}</Text>
+            ) : null}
+          </View>
+          <Pressable
+            hitSlop={12}
+            onPress={() => showSavePicker(loc)}
+            style={[s.saveIconBtn, { backgroundColor: saved ? ORANGE + "18" : C.iconBg }]}
+          >
+            <Ionicons
+              name={saved ? "bookmark" : "bookmark-outline"}
+              size={16}
+              color={saved ? ORANGE : C.sub}
+            />
+          </Pressable>
+        </Pressable>
+      );
+    }
+
+    return null;
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
-    <View style={styles.container}>
+    <View style={[s.container, { backgroundColor: C.bg }]}>
       {HeaderBar}
 
       <FlatList
         data={data}
         keyExtractor={(item) => item.key}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[s.listContent, { backgroundColor: C.bg }]}
         keyboardShouldPersistTaps="handled"
         extraData={resolvingPlaceId}
-        renderItem={({ item }) => {
-
-          if (item._type === "stops-loading" || item._type === "places-loading") {
-            return (
-              <View style={{ paddingVertical: 14, paddingLeft: 48, flexDirection: "row", alignItems: "center" }}>
-                <ActivityIndicator size="small" color={COLORS.subtext} />
-                <Text style={{ marginLeft: 10, color: COLORS.subtext, fontSize: 13 }}>Searching…</Text>
-              </View>
-            );
-          }
-
-          if (item._type === "current-location") {
-            return (
-              <Pressable
-                onPress={() => onSelectLocation(item.location)}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              >
-                <View style={[styles.iconContainer, { backgroundColor: COLORS.blue }]}>
-                  <Ionicons name="locate" size={20} color="#FFFFFF" />
-                </View>
-                <View style={styles.rowContent}>
-                  <Text style={styles.rowText} numberOfLines={1}>{item.location.name}</Text>
-                  <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }}>Use my current location</Text>
-                </View>
-              </Pressable>
-            );
-          }
-
-          if (item._type === "header") {
-            return <Text style={styles.sectionTitle}>{item.title}</Text>;
-          }
-
-          // Place result row
-          if (item._type === "place-item") {
-            const pred = item.place as PlacePrediction;
-            const isResolving = resolvingPlaceId === pred.place_id;
-            return (
-              <Pressable
-                onPress={() => onSelectPlace(pred)}
-                disabled={isResolving}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              >
-                <View style={styles.iconContainer}>
-                  {isResolving
-                    ? <ActivityIndicator size="small" color={COLORS.primary} />
-                    : <Ionicons name="location-outline" size={20} color={COLORS.text} />
-                  }
-                </View>
-                <View style={styles.rowContent}>
-                  <Text style={[styles.rowText, { fontWeight: "600" }]} numberOfLines={1}>{pred.main_text}</Text>
-                  {pred.secondary_text ? (
-                    <Text style={{ fontSize: 12, color: COLORS.subtext, marginTop: 2 }} numberOfLines={1}>
-                      {pred.secondary_text}
-                    </Text>
-                  ) : null}
-                </View>
-              </Pressable>
-            );
-          }
-
-          // Stop result row or recent row
-          const loc = item.location as UnifiedLocation;
-          let IconName: any = "location-outline";
-          if (item._type === "recent") IconName = "time-outline";
-          else if (loc._type === "stop") IconName = "bus-outline";
-
-          return (
-            <Pressable
-              onPress={() => onSelectLocation(loc)}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            >
-              <View style={styles.iconContainer}>
-                <Ionicons name={IconName} size={20} color={COLORS.text} />
-              </View>
-              <View style={styles.rowContent}>
-                <Text style={styles.rowText} numberOfLines={1}>{loc.name}</Text>
-                {loc._type === "stop" && loc.route_nams && (
-                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                    <Text style={{ fontSize: 12, color: COLORS.subtext, marginRight: 6, fontWeight: "500" }}>Serves</Text>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ alignItems: "center" }}
-                      pointerEvents="none"
-                    >
-                      {loc.route_nams.split(",").map((routeName, index) => {
-                        const cleanName = routeName.trim();
-                        const badgeColor = getRouteColor(cleanName);
-                        return (
-                          <View
-                            key={index}
-                            style={{
-                              backgroundColor: `${badgeColor}15`,
-                              paddingHorizontal: 6,
-                              paddingVertical: 2,
-                              borderRadius: 6,
-                              marginRight: 6,
-                              borderWidth: StyleSheet.hairlineWidth,
-                              borderColor: `${badgeColor}30`,
-                            }}
-                          >
-                            <Text style={{ fontSize: 11, fontWeight: "700", color: badgeColor }}>{cleanName}</Text>
-                          </View>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                )}
-              </View>
-            </Pressable>
-          );
-        }}
+        renderItem={renderItem}
       />
 
+      {/* Route results sheet */}
       <Animated.View
         style={[
-          styles.bottomSheet,
+          s.bottomSheet,
           {
             transform: [{ translateY: sheetAnim }],
             paddingBottom: Math.max(insets.bottom, 16),
+            backgroundColor: C.sheet,
           },
         ]}
       >
-        <View style={styles.sheetHandle} />
-        <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>Available Routes</Text>
+        <View style={[s.sheetHandle, { backgroundColor: C.handle }]} />
+
+        <View style={[s.sheetHeader, { borderBottomColor: C.hairline }]}>
+          <Text style={[s.sheetTitle, { color: C.text }]}>Available Routes</Text>
+          {fromLoc && toLoc && (
+            <Text style={[s.sheetSubtitle, { color: C.sub }]} numberOfLines={1}>
+              {fromLoc.name} → {toLoc.name}
+            </Text>
+          )}
         </View>
 
         {isFetchingRoutes ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={[styles.emptyStateSubtext, { marginTop: 16 }]}>
-              Finding the best lines...
+          <View style={s.sheetEmpty}>
+            <ActivityIndicator size="large" color={ORANGE} />
+            <Text style={[s.sheetEmptySub, { color: C.sub, marginTop: 16 }]}>
+              Finding the best lines…
             </Text>
           </View>
         ) : availableRoutes.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="bus-outline" size={48} color={COLORS.border} />
-            <Text style={styles.emptyStateText}>No transit available.</Text>
-            <Text style={styles.emptyStateSubtext}>
+          <View style={s.sheetEmpty}>
+            <View style={[s.sheetEmptyIcon, { backgroundColor: C.iconBg }]}>
+              <Ionicons name="bus-outline" size={32} color={C.sub} />
+            </View>
+            <Text style={[s.sheetEmptyTitle, { color: C.text }]}>No transit available</Text>
+            <Text style={[s.sheetEmptySub, { color: C.sub }]}>
               Buses might not be running right now, or the location is too far.
             </Text>
           </View>
         ) : (
           <FlatList
             data={availableRoutes}
-            keyExtractor={(item, index) => `route-${index}`}
+            keyExtractor={(_, i) => `route-${i}`}
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
             renderItem={({ item: route }) => {
-              
-              // Safely extract ONLY the transit segments to build the title
-              const transitSegments = route.segments.filter(s => s.mode === 'BUS' || s.mode === 'TRAM');
-              
+              const transitSegs = route.segments.filter(
+                (s) => s.mode === "BUS" || s.mode === "TRAM"
+              );
               let title = "Walk Only";
-              if (transitSegments.length === 1) {
-                title = `Line ${transitSegments[0].route_name}`;
-              } else if (transitSegments.length > 1) {
-                title = `Line ${transitSegments[0].route_name} ➔ ${transitSegments[1].route_name}`;
-              }
+              if (transitSegs.length === 1) title = `Line ${transitSegs[0].route_name}`;
+              else if (transitSegs.length > 1)
+                title = `Line ${transitSegs[0].route_name} → ${transitSegs[1].route_name}`;
+
+              const hasTransit = transitSegs.length > 0;
+              const iconName = route.type === "transfer"
+                ? "git-network-outline"
+                : hasTransit ? "bus" : "walk";
+              const iconBg = route.type === "transfer"
+                ? BLUE
+                : hasTransit ? ORANGE : GREY;
 
               return (
                 <Pressable
                   onPress={() => onSelectRoute(route)}
                   style={({ pressed }) => [
-                    styles.routeCardItem,
-                    pressed && styles.rowPressed,
+                    s.routeItem,
+                    { borderBottomColor: C.hairline, opacity: pressed ? 0.7 : 1 },
                   ]}
                 >
-                  <View
-                    style={[
-                      styles.iconContainer,
-                      { backgroundColor: route.type === 'transfer' ? COLORS.blue : (transitSegments.length > 0 ? COLORS.primary : COLORS.grey) },
-                    ]}
-                  >
-                    <Ionicons 
-                      name={route.type === 'transfer' ? "git-network-outline" : (transitSegments.length > 0 ? "bus" : "walk")} 
-                      size={20} 
-                      color="#FFFFFF" 
-                    />
+                  <View style={[s.iconWrap, { backgroundColor: iconBg }]}>
+                    <Ionicons name={iconName} size={18} color="#FFF" />
                   </View>
-                  <View style={styles.rowContent}>
-                    
-                    <Text style={[styles.rowText, { fontWeight: "700" }]} numberOfLines={1}>
+                  <View style={s.rowBody}>
+                    <Text style={[s.rowTitle, { color: C.text, fontWeight: "700" }]} numberOfLines={1}>
                       {title}
                     </Text>
-                    
-                    <Text style={{ color: COLORS.subtext, fontSize: 13, marginTop: 2 }}>
-                      {route.summary}
-                    </Text>
-                    
+                    <Text style={[s.rowSub, { color: C.sub }]}>{route.summary}</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color={COLORS.border} />
+                  <Ionicons name="chevron-forward" size={18} color={C.border} />
                 </Pressable>
               );
             }}
@@ -508,140 +653,161 @@ export default function SearchScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
+// ── Styles ─────────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  container: { flex: 1 },
+
+  // Header
   headerContainer: {
-    backgroundColor: COLORS.background,
-    paddingBottom: 16,
+    paddingBottom:     16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-    zIndex: 10,
+    zIndex:            10,
   },
   headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection:  "row",
+    alignItems:     "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom:   16,
   },
-  headerTitle: { fontSize: 17, fontWeight: "600", color: COLORS.text },
-  backBtn: { marginLeft: -8 },
+  headerTitle: { fontSize: 17, fontWeight: "600" },
+  backBtn:     { marginLeft: -8 },
+
+  // Route card (from/to inputs)
   routeCard: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection:    "row",
+    alignItems:       "center",
     marginHorizontal: 16,
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    paddingVertical: 4,
-    paddingRight: 8,
+    borderRadius:     14,
+    paddingVertical:  4,
+    paddingRight:     8,
   },
   timeline: {
-    width: 40,
-    alignItems: "center",
+    width:          40,
+    alignItems:     "center",
     justifyContent: "center",
     paddingVertical: 14,
   },
-  dotFrom: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.subtext,
-  },
-  line: {
-    width: 2,
-    height: 24,
-    backgroundColor: COLORS.border,
-    marginVertical: 4,
-  },
-  squareTo: { width: 8, height: 8, backgroundColor: COLORS.text },
-  inputStack: { flex: 1 },
+  dotFrom:  { width: 8, height: 8, borderRadius: 4 },
+  line:     { width: 2, height: 24, marginVertical: 4 },
+  squareTo: { width: 8, height: 8 },
+
+  inputStack:   { flex: 1 },
   inputWrapper: { flexDirection: "row", alignItems: "center" },
-  input: { flex: 1, height: 44, color: COLORS.text, fontSize: 16 },
-  inputFocused: {},
-  clearBtn: { padding: 8 },
-  divider: { height: 1, backgroundColor: COLORS.border, marginLeft: 0 },
-  swapBtn: { padding: 8, marginLeft: 4 },
-  listContent: { paddingHorizontal: 16, paddingBottom: 100, paddingTop: 8 },
+  input:        { flex: 1, height: 44, fontSize: 16 },
+  clearBtn:     { padding: 8 },
+  divider:      { height: 1 },
+  swapBtn:      { padding: 8, marginLeft: 4 },
+
+  // List
+  listContent: { paddingBottom: 120, paddingTop: 4 },
+
   sectionTitle: {
-    color: COLORS.subtext,
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 16,
-    marginBottom: 8,
-    textTransform: "uppercase",
+    fontSize:      12,
+    fontWeight:    "700",
+    marginTop:     16,
+    marginBottom:  6,
+    marginHorizontal: 16,
     letterSpacing: 0.5,
+    textTransform: "uppercase",
   },
-  row: { flexDirection: "row", alignItems: "center", paddingVertical: 12 },
-  rowPressed: { opacity: 0.5 },
-  iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.card,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  rowContent: {
-    flex: 1,
+
+  loadingRow: {
+    flexDirection:    "row",
+    alignItems:       "center",
+    paddingVertical:  14,
+    paddingHorizontal: 16,
+    gap:              10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-    paddingBottom: 12,
-    marginTop: 12,
   },
-  rowText: { color: COLORS.text, fontSize: 16 },
+  loadingText: { fontSize: 13 },
+
+  // Rows
+  row: {
+    flexDirection:    "row",
+    alignItems:       "center",
+    paddingHorizontal: 16,
+    paddingVertical:  12,
+    gap:              12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  iconWrap: {
+    width:          36,
+    height:         36,
+    borderRadius:   18,
+    alignItems:     "center",
+    justifyContent: "center",
+    flexShrink:     0,
+  },
+  rowBody:   { flex: 1 },
+  rowTitle:  { fontSize: 15, fontWeight: "500" },
+  rowSub:    { fontSize: 12, marginTop: 2 },
+
+  routeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical:   2,
+    borderRadius:      5,
+    borderWidth:       StyleSheet.hairlineWidth,
+  },
+  routeBadgeText: { fontSize: 11, fontWeight: "700" },
+
+  saveIconBtn: {
+    width:          32,
+    height:         32,
+    borderRadius:   16,
+    alignItems:     "center",
+    justifyContent: "center",
+    flexShrink:     0,
+  },
+
+  // Bottom sheet
   bottomSheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: COLORS.background,
-    borderTopLeftRadius: 24,
+    position:            "absolute",
+    left:                0,
+    right:               0,
+    bottom:              0,
+    height:              SCREEN_HEIGHT * 0.62,
+    borderTopLeftRadius:  24,
     borderTopRightRadius: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 20,
-    height: SCREEN_HEIGHT * 0.6,
+    shadowColor:          "#000",
+    shadowOffset:         { width: 0, height: -4 },
+    shadowOpacity:        0.12,
+    shadowRadius:         16,
+    elevation:            24,
   },
   sheetHandle: {
-    width: 40,
-    height: 5,
+    width:      40,
+    height:     5,
     borderRadius: 3,
-    backgroundColor: COLORS.border,
-    alignSelf: "center",
-    marginTop: 12,
-    marginBottom: 8,
+    alignSelf:  "center",
+    marginTop:  12,
+    marginBottom: 4,
   },
   sheetHeader: {
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingVertical:   14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
   },
-  sheetTitle: { fontSize: 20, fontWeight: "700", color: COLORS.text },
-  routeCardItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 16,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: "center",
+  sheetTitle:    { fontSize: 20, fontWeight: "700" },
+  sheetSubtitle: { fontSize: 13, marginTop: 3 },
+
+  sheetEmpty: {
+    flex:           1,
+    alignItems:     "center",
     justifyContent: "center",
     paddingHorizontal: 32,
+    gap:            12,
   },
-  emptyStateText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: COLORS.text,
-    marginTop: 16,
-  },
-  emptyStateSubtext: {
-    fontSize: 15,
-    color: COLORS.subtext,
-    textAlign: "center",
-    marginTop: 8,
+  sheetEmptyIcon:  { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
+  sheetEmptyTitle: { fontSize: 17, fontWeight: "600" },
+  sheetEmptySub:   { fontSize: 14, textAlign: "center" },
+
+  routeItem: {
+    flexDirection:    "row",
+    alignItems:       "center",
+    paddingVertical:  14,
+    gap:              12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
 });

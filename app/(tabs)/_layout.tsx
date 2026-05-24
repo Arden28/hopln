@@ -12,6 +12,7 @@ import {
   Text,
   View,
   Platform,
+  useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Profile from "./profile";
@@ -56,6 +57,9 @@ function DraggableSheet({
   children: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const dark = useColorScheme() === 'dark';
+  const sheetBg = dark ? '#1C1C1E' : WHITE;
+  const handleColor = dark ? '#3A3A3C' : '#D1D5DB';
   
   // 3-Step Snapping Points
   const SNAP_Y  = SCREEN_H * (1 - snapFraction); // Half open
@@ -171,11 +175,11 @@ function DraggableSheet({
       {/* Sheet card */}
       <Animated.View
         pointerEvents="auto"
-        style={[styles.sheet, { transform: [{ translateY }] }]}
+        style={[styles.sheet, { transform: [{ translateY }], backgroundColor: sheetBg }]}
       >
         {/* Drag handle */}
         <View {...panResponder.panHandlers} style={styles.handleArea}>
-          <View style={styles.handle} />
+          <View style={[styles.handle, { backgroundColor: handleColor }]} />
         </View>
 
         <ScrollView
@@ -200,12 +204,16 @@ function CustomTabBar({
   onTabPress: (id: TabId) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const dark = useColorScheme() === 'dark';
+  const tabBarBg = dark ? '#1C1C1E' : WHITE;
+  const labelColor = dark ? '#EBEBF5' : INACTIVE_BLACK;
+  const inactiveIconColor = dark ? '#8E8E93' : '#5F6368';
 
   return (
     <View
       style={[
         styles.tabBar,
-        {paddingBottom: Platform.OS === "ios" ? insets.bottom - 5 : 0},
+        { paddingBottom: Platform.OS === "ios" ? insets.bottom - 5 : 0, backgroundColor: tabBarBg },
       ]}
     >
       {TABS.map((tab) => {
@@ -223,13 +231,12 @@ function CustomTabBar({
               <Ionicons
                 name={isActive ? tab.iconActive : tab.icon}
                 size={22}
-                color={isActive ? WHITE : "#5F6368"}
+                color={isActive ? WHITE : inactiveIconColor}
               />
             </View>
-              {isActive && <Text style={styles.tabLabel}>{tab.label}</Text>}
-            {/* Dot indicator for inactive tabs on smaller screens */}
+              {isActive && <Text style={[styles.tabLabel, { color: labelColor }]}>{tab.label}</Text>}
             {!isActive && (
-              <Text style={styles.tabInactiveLabel} numberOfLines={1}>
+              <Text style={[styles.tabInactiveLabel, { color: labelColor }]} numberOfLines={1}>
                 {tab.label}
               </Text>
             )}
@@ -244,9 +251,10 @@ function CustomTabBar({
 // ─── Sheet: Contribute ────────────────────────────────────────────────────────
 
 function ContributeContent() {
+  const dark = useColorScheme() === 'dark';
   return (
     <View style={styles.sheetBody}>
-      <Text style={styles.sheetTitle}>Contribute</Text>
+      <Text style={[styles.sheetTitle, { color: dark ? '#FFFFFF' : BLACK }]}>Contribute</Text>
       <Text style={styles.sheetSubtitle}>Help improve Safiri for everyone in Nairobi</Text>
     </View>
   );
@@ -276,8 +284,10 @@ export default function TabsLayout() {
     setActiveTab("explore");
   };
 
+  const dark = useColorScheme() === 'dark';
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+    <View style={{ flex: 1, backgroundColor: dark ? '#0F0F0F' : '#FFFFFF' }}>
       {/* expo-router screens — native tab bar hidden */}
       <Tabs
         initialRouteName="map"
@@ -299,7 +309,7 @@ export default function TabsLayout() {
         snapFraction={0.6}
         minHeightOffset={230} // Peeking limit
       >
-        <FavoriteScreen />
+        <FavoriteScreen onClose={closeSheet} />
       </DraggableSheet>
 
       <DraggableSheet

@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthService } from "@/services/auth";
@@ -20,8 +21,9 @@ export default function VerifyPhone() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { setAuth } = useAuthStore();
+  const dark = useColorScheme() === "dark";
 
-  const params = useLocalSearchParams<{ phone: string; setupToken?: string }>();
+  const params = useLocalSearchParams<{ phone?: string; setupToken?: string }>();
   const phone = params.phone ?? "";
   const setupToken = params.setupToken;
 
@@ -34,8 +36,11 @@ export default function VerifyPhone() {
   const codeRefs = useRef<(TextInput | null)[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const C = theme(dark);
+
   useEffect(() => {
     startCountdown();
+    setTimeout(() => codeRefs.current[0]?.focus(), 400);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
@@ -51,6 +56,7 @@ export default function VerifyPhone() {
   };
 
   const resend = async () => {
+    if (!phone) return;
     setError("");
     setResending(true);
     try {
@@ -68,16 +74,11 @@ export default function VerifyPhone() {
     const next = [...code];
     next[idx] = digit;
     setCode(next);
-    if (digit && idx < 5) {
-      codeRefs.current[idx + 1]?.focus();
-    }
-    if (!digit && idx > 0) {
-      codeRefs.current[idx - 1]?.focus();
-    }
-    // Auto-submit when last digit filled
+    if (digit && idx < 5) codeRefs.current[idx + 1]?.focus();
+    if (!digit && idx > 0) codeRefs.current[idx - 1]?.focus();
     if (digit && idx === 5) {
-      const fullCode = [...next].join("");
-      if (fullCode.length === 6) verify(fullCode);
+      const full = next.join("");
+      if (full.length === 6) verify(full);
     }
   };
 
@@ -88,13 +89,11 @@ export default function VerifyPhone() {
     setLoading(true);
     try {
       const res = await AuthService.verifyOtp(phone, codeStr, setupToken);
-
       if ("token" in res) {
         await setAuth(res.user, res.token);
         router.replace("/(tabs)/map");
       } else {
-        // email+password flow: phone verified, go to login
-        router.replace("/(auth)/login");
+        router.replace("/(auth)/login" as any);
       }
     } catch (e: any) {
       setError(e.message || "Verification failed.");
@@ -106,67 +105,101 @@ export default function VerifyPhone() {
   };
 
   const maskedPhone = phone.length > 6
-    ? phone.slice(0, 4) + "****" + phone.slice(-3)
+    ? phone.slice(0, 4) + " *** " + phone.slice(-3)
     : phone;
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#0A0A0A" }}
+      style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[
+          styles.container,
+          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         <Pressable onPress={() => router.back()} style={styles.back}>
-          <Ionicons name="arrow-back" size={22} color="#FFF" />
+          <View style={[styles.backBtn, { backgroundColor: C.inputBg }]}>
+            <Ionicons name="arrow-back" size={20} color={C.text} />
+          </View>
         </Pressable>
 
-        <View style={styles.iconWrap}>
-          <Ionicons name="phone-portrait-outline" size={36} color="#FF6F00" />
+        {/* Icon badge */}
+        <View style={[styles.badge, { backgroundColor: C.accentBg }]}>
+          <Ionicons name="phone-portrait-outline" size={28} color={C.accent} />
         </View>
 
-        <Text style={styles.title}>Verify your phone</Text>
-        <Text style={styles.subtitle}>
-          We sent a 6-digit code to{" "}
-          <Text style={{ color: "#FFF", fontWeight: "600" }}>{maskedPhone}</Text>
-        </Text>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: C.text }]}>Verify your phone</Text>
+          <Text style={[styles.subtitle, { color: C.textSub }]}>
+            We sent a 6-digit code to{" "}
+            <Text style={[styles.phoneText, { color: C.text }]}>{maskedPhone}</Text>
+          </Text>
+        </View>
 
-        {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
+        {!!error && (
+          <View style={[styles.errorBox, { backgroundColor: C.errBg, borderColor: C.errBd }]}>
+            <Ionicons name="alert-circle-outline" size={16} color={C.errText} />
+            <Text style={[styles.errorText, { color: C.errText }]}>{error}</Text>
+          </View>
+        )}
 
+        {/* OTP input */}
         <View style={styles.codeRow}>
           {code.map((digit, i) => (
             <TextInput
               key={i}
               ref={(r) => { codeRefs.current[i] = r; }}
-              style={[styles.codeBox, digit ? styles.codeBoxFilled : null]}
+              style={[
+                styles.codeBox,
+                {
+                  backgroundColor: C.inputBg,
+                  borderColor: digit ? C.accent : C.inputBd,
+                  color: C.text,
+                },
+              ]}
               value={digit}
               onChangeText={(t) => onCodeChange(t, i)}
               keyboardType="number-pad"
               maxLength={1}
               selectTextOnFocus
-              autoFocus={i === 0}
             />
           ))}
         </View>
 
+        {/* Verify button */}
         <Pressable
-          style={[styles.primary, (loading || code.join("").length < 6) && { opacity: 0.5 }]}
+          style={[
+            styles.primary,
+            { backgroundColor: C.accent },
+            (loading || code.join("").length < 6) && styles.btnDisabled,
+          ]}
           onPress={() => verify()}
           disabled={loading || code.join("").length < 6}
         >
-          {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryText}>Verify</Text>}
+          {loading ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <Text style={styles.primaryText}>Verify code</Text>
+          )}
         </Pressable>
 
+        {/* Resend */}
         <View style={styles.resendRow}>
           {countdown > 0 ? (
-            <Text style={styles.countdownText}>Resend code in {countdown}s</Text>
+            <Text style={[styles.countdownText, { color: C.textSub }]}>
+              Resend code in{" "}
+              <Text style={{ color: C.accent, fontWeight: "600" }}>{countdown}s</Text>
+            </Text>
           ) : (
-            <Pressable onPress={resend} disabled={resending}>
-              {resending
-                ? <ActivityIndicator color="#FF6F00" size="small" />
-                : <Text style={styles.resendLink}>Resend code</Text>
-              }
+            <Pressable onPress={resend} disabled={resending} style={styles.resendBtn}>
+              {resending ? (
+                <ActivityIndicator size="small" color={C.accent} />
+              ) : (
+                <Text style={[styles.resendText, { color: C.accent }]}>Resend code</Text>
+              )}
             </Pressable>
           )}
         </View>
@@ -175,50 +208,71 @@ export default function VerifyPhone() {
   );
 }
 
+function theme(dark: boolean) {
+  return {
+    bg:          dark ? "#0F0F0F" : "#FFFFFF",
+    text:        dark ? "#F9FAFB" : "#111827",
+    textSub:     dark ? "#9CA3AF" : "#6B7280",
+    inputBg:     dark ? "#1C1C1E" : "#F3F4F6",
+    inputBd:     dark ? "#2C2C2E" : "#E5E7EB",
+    accent:      "#FF6F00",
+    accentBg:    dark ? "rgba(255,111,0,0.12)" : "#FFF7ED",
+    errBg:       dark ? "rgba(220,38,38,0.1)" : "#FEF2F2",
+    errBd:       dark ? "rgba(220,38,38,0.2)" : "#FECACA",
+    errText:     dark ? "#FF6B6B" : "#DC2626",
+  };
+}
+
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 24, gap: 16 },
-  back: { marginBottom: 8 },
-  iconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,111,0,0.12)",
+  container: { paddingHorizontal: 24, gap: 24 },
+  back: {},
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    alignSelf: "flex-start",
   },
-  title: { fontSize: 28, fontWeight: "800", color: "#FFF" },
-  subtitle: { fontSize: 15, color: "#888" },
-  errorBanner: {
-    backgroundColor: "rgba(220,53,69,0.15)",
-    color: "#FF6B6B",
+  badge: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  header: { gap: 8 },
+  title: { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
+  subtitle: { fontSize: 15, lineHeight: 22 },
+  phoneText: { fontWeight: "600" },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     padding: 12,
-    borderRadius: 10,
-    fontSize: 14,
-  },
-  codeRow: { flexDirection: "row", gap: 10, justifyContent: "center", marginVertical: 8 },
-  codeBox: {
-    width: 44,
-    height: 56,
-    backgroundColor: "#1A1A1A",
-    borderWidth: 1.5,
-    borderColor: "#2A2A2A",
     borderRadius: 12,
-    color: "#FFF",
+    borderWidth: 1,
+  },
+  errorText: { flex: 1, fontSize: 14 },
+  codeRow: { flexDirection: "row", gap: 10, justifyContent: "center" },
+  codeBox: {
+    width: 46,
+    height: 58,
+    borderRadius: 14,
+    borderWidth: 2,
     fontSize: 24,
     fontWeight: "700",
     textAlign: "center",
   },
-  codeBoxFilled: { borderColor: "#FF6F00" },
   primary: {
-    backgroundColor: "#FF6F00",
-    paddingVertical: 16,
-    borderRadius: 14,
+    height: 56,
+    borderRadius: 16,
     alignItems: "center",
-    marginTop: 4,
+    justifyContent: "center",
   },
   primaryText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
-  resendRow: { alignItems: "center", marginTop: 4 },
-  countdownText: { color: "#666", fontSize: 14 },
-  resendLink: { color: "#FF6F00", fontSize: 14, fontWeight: "600" },
+  btnDisabled: { opacity: 0.45 },
+  resendRow: { alignItems: "center" },
+  resendBtn: { paddingVertical: 4 },
+  countdownText: { fontSize: 14 },
+  resendText: { fontSize: 14, fontWeight: "600" },
 });

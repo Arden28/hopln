@@ -11,13 +11,18 @@ import {
   Text,
   TextInput,
   View,
+  useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SocialButtons } from "@/components/auth/SocialButtons";
 import { AuthService } from "@/services/auth";
+import { useAuthStore, type AuthUser } from "@/store/authStore";
 
 export default function Register() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { setAuth } = useAuthStore();
+  const dark = useColorScheme() === "dark";
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -28,12 +33,11 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const C = theme(dark);
+
   const submit = async () => {
     setError("");
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
+    if (password !== confirm) { setError("Passwords do not match."); return; }
     setLoading(true);
     try {
       const res = await AuthService.register({
@@ -51,63 +55,137 @@ export default function Register() {
     }
   };
 
+  const handleSocialSuccess = async (user: AuthUser, token: string) => {
+    await setAuth(user, token);
+    router.replace("/(tabs)/map");
+  };
+
+  const handleNeedsPhone = (setupToken: string) => {
+    router.push({ pathname: "/(auth)/verify-phone", params: { setupToken } });
+  };
+
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#0A0A0A" }}
+      style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[
+          styles.container,
+          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 },
+        ]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         {/* Back */}
         <Pressable onPress={() => router.back()} style={styles.back}>
-          <Ionicons name="arrow-back" size={22} color="#FFF" />
+          <View style={[styles.backBtn, { backgroundColor: C.inputBg }]}>
+            <Ionicons name="arrow-back" size={20} color={C.text} />
+          </View>
         </Pressable>
 
-        <Text style={styles.title}>Create account</Text>
-        <Text style={styles.subtitle}>Join Hopln and navigate Nairobi like a local.</Text>
-
-        {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
-
-        <Field label="Full name" value={name} onChangeText={setName} placeholder="e.g. Amara Osei" />
-        <Field label="Email" value={email} onChangeText={setEmail} placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" />
-        <Field label="Phone number" value={phone} onChangeText={setPhone} placeholder="+254712345678" keyboardType="phone-pad" />
-
-        {/* Password with toggle */}
-        <View style={styles.fieldWrap}>
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.pwRow}>
-            <TextInput
-              style={[styles.input, { flex: 1, borderWidth: 0 }]}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Min. 8 characters"
-              placeholderTextColor="#555"
-              secureTextEntry={!showPw}
-            />
-            <Pressable onPress={() => setShowPw((v) => !v)} style={{ padding: 10 }}>
-              <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={20} color="#777" />
-            </Pressable>
-          </View>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: C.text }]}>Create account</Text>
+          <Text style={[styles.subtitle, { color: C.textSub }]}>
+            Join Hopln and navigate Nairobi like a local.
+          </Text>
         </View>
 
-        <Field
-          label="Confirm password"
-          value={confirm}
-          onChangeText={setConfirm}
-          placeholder="Repeat password"
-          secureTextEntry
+        {/* Social first */}
+        <SocialButtons
+          onSuccess={handleSocialSuccess}
+          onNeedsPhone={handleNeedsPhone}
+          onError={setError}
+          disabled={loading}
         />
 
-        <Pressable style={[styles.primary, loading && { opacity: 0.6 }]} onPress={submit} disabled={loading}>
-          {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryText}>Create account</Text>}
+        {/* Divider "or with email" */}
+        <View style={styles.dividerRow}>
+          <View style={[styles.line, { backgroundColor: C.inputBd }]} />
+          <Text style={[styles.dividerText, { color: C.textSub }]}>or with email</Text>
+          <View style={[styles.line, { backgroundColor: C.inputBd }]} />
+        </View>
+
+        {/* Error */}
+        {!!error && (
+          <View style={[styles.errorBox, { backgroundColor: C.errBg, borderColor: C.errBd }]}>
+            <Ionicons name="alert-circle-outline" size={16} color={C.errText} />
+            <Text style={[styles.errorText, { color: C.errText }]}>{error}</Text>
+          </View>
+        )}
+
+        {/* Form */}
+        <View style={styles.form}>
+          <Field label="Full name" value={name} onChangeText={setName} placeholder="e.g. Amara Osei" C={C} />
+          <Field
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@email.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            C={C}
+          />
+          <Field
+            label="Phone number"
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="+254712345678"
+            keyboardType="phone-pad"
+            C={C}
+          />
+
+          {/* Password */}
+          <View style={styles.fieldWrap}>
+            <Text style={[styles.label, { color: C.textSub }]}>Password</Text>
+            <View style={[styles.pwRow, { backgroundColor: C.inputBg, borderColor: C.inputBd }]}>
+              <TextInput
+                style={[styles.pwInput, { color: C.text }]}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Min. 8 characters"
+                placeholderTextColor={C.placeholder}
+                secureTextEntry={!showPw}
+              />
+              <Pressable onPress={() => setShowPw((v) => !v)} style={styles.eyeBtn}>
+                <Ionicons
+                  name={showPw ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={C.textSub}
+                />
+              </Pressable>
+            </View>
+          </View>
+
+          <Field
+            label="Confirm password"
+            value={confirm}
+            onChangeText={setConfirm}
+            placeholder="Repeat password"
+            secureTextEntry
+            C={C}
+          />
+        </View>
+
+        {/* Submit */}
+        <Pressable
+          style={[styles.primary, { backgroundColor: C.accent }, loading && styles.btnDisabled]}
+          onPress={submit}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <Text style={styles.primaryText}>Create account</Text>
+          )}
         </Pressable>
 
+        {/* Footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Already have an account? </Text>
+          <Text style={[styles.footerText, { color: C.textSub }]}>Already have an account? </Text>
           <Pressable onPress={() => router.replace("/(auth)/login")}>
-            <Text style={styles.link}>Sign in</Text>
+            <Text style={[styles.link, { color: C.accent }]}>Sign in</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -117,57 +195,90 @@ export default function Register() {
 
 function Field({
   label,
+  C,
   ...props
-}: { label: string } & React.ComponentProps<typeof TextInput>) {
+}: { label: string; C: ReturnType<typeof theme> } & React.ComponentProps<typeof TextInput>) {
   return (
     <View style={styles.fieldWrap}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput style={styles.input} placeholderTextColor="#555" {...props} />
+      <Text style={[styles.label, { color: C.textSub }]}>{label}</Text>
+      <TextInput
+        style={[styles.input, { backgroundColor: C.inputBg, borderColor: C.inputBd, color: C.text }]}
+        placeholderTextColor={C.placeholder}
+        {...props}
+      />
     </View>
   );
 }
 
+function theme(dark: boolean) {
+  return {
+    bg:          dark ? "#0F0F0F" : "#FFFFFF",
+    text:        dark ? "#F9FAFB" : "#111827",
+    textSub:     dark ? "#9CA3AF" : "#6B7280",
+    inputBg:     dark ? "#1C1C1E" : "#F3F4F6",
+    inputBd:     dark ? "#2C2C2E" : "#E5E7EB",
+    placeholder: dark ? "#4B5563" : "#9CA3AF",
+    accent:      "#FF6F00",
+    errBg:       dark ? "rgba(220,38,38,0.1)" : "#FEF2F2",
+    errBd:       dark ? "rgba(220,38,38,0.2)" : "#FECACA",
+    errText:     dark ? "#FF6B6B" : "#DC2626",
+  };
+}
+
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 24, gap: 16 },
-  back: { marginBottom: 8 },
-  title: { fontSize: 28, fontWeight: "800", color: "#FFF" },
-  subtitle: { fontSize: 15, color: "#888", marginBottom: 8 },
-  errorBanner: {
-    backgroundColor: "rgba(220,53,69,0.15)",
-    color: "#FF6B6B",
-    padding: 12,
-    borderRadius: 10,
-    fontSize: 14,
-  },
-  fieldWrap: { gap: 6 },
-  label: { color: "#AAA", fontSize: 13 },
-  input: {
-    backgroundColor: "#1A1A1A",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
+  container: { paddingHorizontal: 24, gap: 20 },
+  back: { marginBottom: 4 },
+  backBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  header: { gap: 6 },
+  title: { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
+  subtitle: { fontSize: 15, lineHeight: 22 },
+  dividerRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  line: { flex: 1, height: 1 },
+  dividerText: { fontSize: 13 },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  errorText: { flex: 1, fontSize: 14 },
+  form: { gap: 16 },
+  fieldWrap: { gap: 8 },
+  label: { fontSize: 13, fontWeight: "500" },
+  input: {
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: "#FFF",
     fontSize: 15,
   },
   pwRow: {
+    height: 52,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1A1A1A",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 12,
-  },
-  primary: {
-    backgroundColor: "#FF6F00",
-    paddingVertical: 16,
     borderRadius: 14,
+    borderWidth: 1.5,
+    paddingLeft: 16,
+  },
+  pwInput: { flex: 1, fontSize: 15 },
+  eyeBtn: { paddingHorizontal: 14, height: "100%", justifyContent: "center" },
+  primary: {
+    height: 56,
+    borderRadius: 16,
     alignItems: "center",
-    marginTop: 8,
+    justifyContent: "center",
   },
   primaryText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
-  footer: { flexDirection: "row", justifyContent: "center", marginTop: 4 },
-  footerText: { color: "#888", fontSize: 14 },
-  link: { color: "#FF6F00", fontSize: 14, fontWeight: "600" },
+  btnDisabled: { opacity: 0.55 },
+  footer: { flexDirection: "row", justifyContent: "center" },
+  footerText: { fontSize: 14 },
+  link: { fontSize: 14, fontWeight: "600" },
 });

@@ -1,59 +1,134 @@
-import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
 import { AuthService } from "@/services/auth";
 import { useAuthStore } from "@/store/authStore";
+import { useSavedStore } from "@/store/savedStore";
+import { usePrefsStore } from "@/store/prefsStore";
+import { useContributionStore } from "@/store/contributionStore";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect } from "react";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 
-const BLACK = "#000";
-const ORANGE = "#FF6F00";
+const ORANGE  = "#FF6F00";
+const BLACK   = "#1C1C1E";
 const HAIRLINE = "#E5E7EB";
+const GREY    = "#8E8E93";
 
 function Row({
   icon,
   label,
   value,
   onPress,
+  C,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value?: string | React.ReactNode;
   onPress?: () => void;
+  C: ReturnType<typeof makeC>;
 }) {
   return (
-    <Pressable onPress={onPress} style={styles.row} accessibilityRole="button">
-      <View style={styles.rowLeft}>
-        <Ionicons name={icon} size={18} color={BLACK} />
-        <ThemedText style={styles.rowLabel}>{label}</ThemedText>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [s.row, pressed && onPress ? { backgroundColor: C.pressed, marginHorizontal: -14, paddingHorizontal: 14 } : null]}
+      accessibilityRole="button"
+    >
+      <View style={s.rowLeft}>
+        <Ionicons name={icon} size={18} color={C.icon} />
+        <Text style={[s.rowLabel, { color: C.text }]}>{label}</Text>
       </View>
-      <View style={styles.rowRight}>
+      <View style={s.rowRight}>
         {typeof value === "string" ? (
-          <ThemedText style={styles.rowValue}>{value}</ThemedText>
+          <Text style={[s.rowValue, { color: C.subText }]}>{value}</Text>
         ) : (
           value
         )}
-        <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+        <Ionicons name="chevron-forward" size={18} color={GREY} />
       </View>
     </Pressable>
   );
 }
 
-function Pill({ children }: { children: React.ReactNode }) {
+function Pill({ children, C }: { children: React.ReactNode; C: ReturnType<typeof makeC> }) {
   return (
-    <View style={styles.pill}>
-      <ThemedText style={styles.pillText}>{children}</ThemedText>
+    <View style={[s.pill, { backgroundColor: C.pill }]}>
+      <Text style={s.pillText}>{children}</Text>
     </View>
   );
 }
 
+function makeC(dark: boolean) {
+  return {
+    bg:      dark ? "#0F0F0F" : "#FFFFFF",
+    card:    dark ? "#1C1C1E" : "#FFFFFF",
+    text:    dark ? "#FFFFFF" : BLACK,
+    subText: dark ? GREY     : "#4B5563",
+    hairline:dark ? "#2C2C2E" : HAIRLINE,
+    icon:    dark ? "#EBEBF5" : BLACK,
+    pill:    dark ? "rgba(255,111,0,0.18)" : "#FFF3E0",
+    pressed: dark ? "#2C2C2E" : "#F2F2F7",
+  };
+}
+
+const MAP_APP_LABEL: Record<string, string> = {
+  system: "System default",
+  google: "Google Maps",
+  apple:  "Apple Maps",
+  waze:   "Waze",
+};
+
+const NAV_HINT_LABEL: Record<string, string> = {
+  off:      "Off",
+  concise:  "Concise",
+  detailed: "Detailed",
+};
+
+const WALK_LABEL: Record<number, string> = {
+  500:  "500 m",
+  1000: "1 km",
+  1500: "1.5 km",
+  2000: "2 km",
+};
+
 export default function Profile() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user, logout, avatarTs } = useAuthStore();
+  const dark = useColorScheme() === "dark";
+  const C = makeC(dark);
+  const { places, fetch: fetchSaved, reset: resetSaved } = useSavedStore();
+  const { prefs, loaded: prefsLoaded, load: loadPrefs, set: setPref } = usePrefsStore();
+  const { stats, fetch: fetchContrib, reset: resetContrib } = useContributionStore();
+
+  useEffect(() => { fetchSaved().catch(() => {}); }, [fetchSaved]);
+  useEffect(() => { if (!prefsLoaded) loadPrefs(); }, [prefsLoaded, loadPrefs]);
+  useEffect(() => { fetchContrib().catch(() => {}); }, [fetchContrib]);
+
+  const pickPref = <K extends keyof typeof prefs>(
+    key: K,
+    title: string,
+    options: { label: string; value: typeof prefs[K] }[],
+  ) => {
+    Alert.alert(
+      title,
+      undefined,
+      [
+        ...options.map((o) => ({
+          text: o.value === prefs[key] ? `✓ ${o.label}` : o.label,
+          onPress: () => setPref(key, o.value),
+        })),
+        { text: "Cancel", style: "cancel" as const },
+      ],
+    );
+  };
+
+  const home = places.find((p) => p.pin === "home");
+  const work = places.find((p) => p.pin === "work");
+  const favCount = places.filter((p) => p.list === "favorites").length;
 
   const handleLogout = async () => {
     try { await AuthService.logout(); } catch {}
+    resetSaved();
+    resetContrib();
     await logout();
     router.replace("/(auth)/login" as any);
   };
@@ -63,251 +138,217 @@ export default function Profile() {
     : "?";
 
   return (
-    <ScrollView contentContainerStyle={styles.sheetBody}>
+    <ScrollView
+      style={{ backgroundColor: C.bg }}
+      contentContainerStyle={s.sheetBody}
+    >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={s.header}>
         {user?.avatar ? (
-          <Image source={{ uri: user.avatar }} style={styles.avatar} contentFit="cover" />
+          <Image source={{ uri: `${user.avatar}?_v=${avatarTs}` }} style={s.avatar} contentFit="cover" />
         ) : (
-          <View style={[styles.avatar, styles.avatarFallback]}>
-            <Text style={styles.avatarInitials}>{initials}</Text>
+          <View style={[s.avatar, s.avatarFallback]}>
+            <Text style={s.avatarInitials}>{initials}</Text>
           </View>
         )}
         <View style={{ gap: 4 }}>
-          <ThemedText type="title" style={{ fontSize: 22, color: BLACK }}>
-            {user?.name ?? "—"}
-          </ThemedText>
-          <ThemedText style={{ opacity: 0.7 }}>
-            {user?.email ?? ""}
-          </ThemedText>
+          <Text style={[s.userName, { color: C.text }]}>{user?.name ?? "—"}</Text>
+          <Text style={[s.userEmail, { color: C.subText }]}>{user?.email ?? ""}</Text>
           {user?.phone_number ? (
-            <ThemedText style={{ opacity: 0.5, fontSize: 13 }}>
-              {user.phone_number}
-            </ThemedText>
+            <Text style={[s.userPhone, { color: C.subText }]}>{user.phone_number}</Text>
           ) : null}
         </View>
       </View>
 
-      {/* Movement preferences — aligned to Safiri’s goal */}
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>
-          Travel preferences
-        </ThemedText>
-
+      {/* Travel preferences */}
+      <View style={[s.section, { backgroundColor: C.card }]}>
+        <Text style={[s.sectionTitle, { color: C.subText }]}>TRAVEL PREFERENCES</Text>
         <Row
-          icon="navigate-outline"
-          label="Preferred map app"
-          value="System default"
+          C={C} icon="navigate-outline" label="Preferred map app"
+          value={MAP_APP_LABEL[prefs.mapApp]}
+          onPress={() => pickPref("mapApp", "Preferred map app", [
+            { label: "System default", value: "system" },
+            { label: "Google Maps",    value: "google" },
+            { label: "Apple Maps",     value: "apple"  },
+            { label: "Waze",           value: "waze"   },
+          ])}
         />
-        <View style={styles.sep} />
-        <Row icon="walk-outline" label="Stage hints" value="Concise" />
-        <View style={styles.sep} />
-        <Row icon="analytics-outline" label="Units" value="Kilometers" />
-      </ThemedView>
-
-      {/* Saved places — quick access to common boarding targets */}
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>
-          Saved places
-        </ThemedText>
-
-        <Row icon="home-outline" label="Home" value="Add" onPress={() => {}} />
-        <View style={styles.sep} />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
         <Row
-          icon="briefcase-outline"
-          label="Work"
-          value="Add"
-          onPress={() => {}}
+          C={C} icon="walk-outline" label="Navigation hints"
+          value={NAV_HINT_LABEL[prefs.navHints]}
+          onPress={() => pickPref("navHints", "Navigation hints", [
+            { label: "Off",      value: "off"      },
+            { label: "Concise",  value: "concise"  },
+            { label: "Detailed", value: "detailed" },
+          ])}
         />
-        <View style={styles.sep} />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
         <Row
-          icon="star-outline"
-          label="Favorites"
-          value={<Pill>0</Pill>}
-          onPress={() => {}}
+          C={C} icon="analytics-outline" label="Units"
+          value={prefs.units === "km" ? "Kilometers" : "Miles"}
+          onPress={() => pickPref("units", "Distance units", [
+            { label: "Kilometers", value: "km" },
+            { label: "Miles",      value: "mi" },
+          ])}
         />
-      </ThemedView>
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row
+          C={C} icon="map-outline" label="Navigation view"
+          value={prefs.navView === "tilted" ? "3D (Tilted)" : "Flat (2D)"}
+          onPress={() => pickPref("navView", "Navigation view", [
+            { label: "3D (Tilted)", value: "tilted" },
+            { label: "Flat (2D)",   value: "flat"   },
+          ])}
+        />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row
+          C={C} icon="walk" label="Max walking distance"
+          value={WALK_LABEL[prefs.maxWalkMeters]}
+          onPress={() => pickPref("maxWalkMeters", "Max walking distance", [
+            { label: "500 m",  value: 500  },
+            { label: "1 km",   value: 1000 },
+            { label: "1.5 km", value: 1500 },
+            { label: "2 km",   value: 2000 },
+          ])}
+        />
+      </View>
 
-      {/* Community — contributions fit Safiri’s community-driven mapping */}
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>
-          Community
-        </ThemedText>
+      {/* Saved places */}
+      <View style={[s.section, { backgroundColor: C.card }]}>
+        <Text style={[s.sectionTitle, { color: C.subText }]}>SAVED PLACES</Text>
+        <Row C={C} icon="home-outline" label="Home" value={home?.name ?? "Add"} onPress={() => router.push({ pathname: "/(account)/pick-place", params: { pin: "home" } } as any)} />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row C={C} icon="briefcase-outline" label="Work" value={work?.name ?? "Add"} onPress={() => router.push({ pathname: "/(account)/pick-place", params: { pin: "work" } } as any)} />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row C={C} icon="star-outline" label="Favorites" value={<Pill C={C}>{favCount}</Pill>} onPress={() => router.push({ pathname: "/(account)/saved-places", params: { filter: "favorites" } } as any)} />
+      </View>
 
+      {/* Community */}
+      <View style={[s.section, { backgroundColor: C.card }]}>
+        <Text style={[s.sectionTitle, { color: C.subText }]}>COMMUNITY</Text>
         <Row
-          icon="add-circle-outline"
-          label="Your submissions"
-          value={<Pill>0</Pill>}
-          onPress={() => {}}
+          C={C} icon="add-circle-outline" label="Your submissions"
+          value={<Pill C={C}>{stats?.submissions_count ?? 0}</Pill>}
+          onPress={() => router.push("/(account)/submissions" as any)}
         />
-        <View style={styles.sep} />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
         <Row
-          icon="trophy-outline"
-          label="Safiri Points"
-          value={<Pill>0</Pill>}
-          onPress={() => {}}
+          C={C} icon="trophy-outline" label="Safiri Points"
+          value={<Pill C={C}>{stats?.points ?? 0}</Pill>}
+          onPress={() => router.push("/(account)/badges" as any)}
         />
-      </ThemedView>
+      </View>
 
       {/* Account */}
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>
-          Account
-        </ThemedText>
+      <View style={[s.section, { backgroundColor: C.card }]}>
+        <Text style={[s.sectionTitle, { color: C.subText }]}>ACCOUNT</Text>
+        <Row C={C} icon="person-outline" label="Profile details" onPress={() => router.push("/(account)/profile-details" as any)} />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row C={C} icon="notifications-outline" label="Notifications" onPress={() => router.push("/(account)/notifications" as any)} />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row C={C} icon="shield-checkmark-outline" label="Privacy & security" onPress={() => router.push("/(account)/privacy" as any)} />
+      </View>
 
-        <Row icon="person-outline" label="Profile details" onPress={() => {}} />
-        <View style={styles.sep} />
-        <Row
-          icon="notifications-outline"
-          label="Notifications"
-          onPress={() => {}}
-        />
-        <View style={styles.sep} />
-        <Row
-          icon="shield-checkmark-outline"
-          label="Privacy & security"
-          onPress={() => {}}
-        />
-      </ThemedView>
-
-      {/* Footer actions */}
-      <View style={{ gap: 10 }}>
+      {/* Footer */}
+      <View style={{ gap: 4 }}>
         <Pressable
           onPress={() => {}}
-          style={styles.linkBtn}
+          style={({ pressed }) => [s.linkBtn, { opacity: pressed ? 0.5 : 1 }]}
           accessibilityRole="button"
         >
-          <Ionicons name="document-text-outline" size={18} color={BLACK} />
-          <ThemedText style={styles.linkText}>Terms & Privacy</ThemedText>
+          <Ionicons name="document-text-outline" size={18} color={C.icon} />
+          <Text style={[s.linkText, { color: C.text }]}>Terms & Privacy</Text>
         </Pressable>
         <Pressable
           onPress={handleLogout}
-          style={styles.linkBtn}
+          style={({ pressed }) => [s.linkBtn, { opacity: pressed ? 0.5 : 1 }]}
           accessibilityRole="button"
         >
-          <Ionicons name="log-out-outline" size={18} color={BLACK} />
-          <ThemedText style={styles.linkText}>Sign out</ThemedText>
+          <Ionicons name="log-out-outline" size={18} color="#FF3B30" />
+          <Text style={[s.linkText, { color: "#FF3B30" }]}>Sign out</Text>
         </Pressable>
-        <ThemedText style={styles.version}>v0.1.0</ThemedText>
+        <Text style={s.version}>v0.1.0</Text>
       </View>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   sheetBody: {
     paddingHorizontal: 10,
-    paddingTop:         4,
+    paddingTop:        4,
+    paddingBottom:     90,
+    gap:               16,
   },
-  container: {
-    padding: 20,
-    paddingTop: Platform.OS === "ios" ? 55 : 20,
-    gap: 24,
-    backgroundColor: "#F6F7F8", // neutral, not white
-  },
-
-  /* Top bar */
-  topbar: {
-    marginTop: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  backBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
-  backText: { color: BLACK, fontSize: 16 },
-  topbarTitle: { color: BLACK, fontSize: 16, fontWeight: "600" },
 
   /* Header */
   header: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
+    alignItems:    "center",
+    gap:           14,
+    paddingVertical: 8,
   },
   avatar: {
-    width: 64,
-    height: 64,
+    width:        64,
+    height:       64,
     borderRadius: 999,
   },
   avatarFallback: {
-    backgroundColor: "#FF6F00",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: ORANGE,
+    justifyContent:  "center",
+    alignItems:      "center",
   },
-  avatarInitials: {
-    color: "#FFF",
-    fontSize: 22,
-    fontWeight: "700",
-  },
+  avatarInitials: { color: "#FFF", fontSize: 22, fontWeight: "700" },
+  userName:       { fontSize: 22, fontWeight: "700" },
+  userEmail:      { fontSize: 14, opacity: 0.85 },
+  userPhone:      { fontSize: 13, opacity: 0.6 },
 
   /* Sections */
   section: {
-    padding: 6,
-    borderRadius: 10,
-    gap: 0,
+    borderRadius:      14,
+    paddingHorizontal: 14,
+    paddingTop:        12,
+    paddingBottom:     4,
   },
   sectionTitle: {
-    fontWeight: "600",
-    color: BLACK,
-    marginBottom: 10,
+    fontSize:      11,
+    fontWeight:    "700",
+    letterSpacing: 0.5,
+    marginBottom:  6,
   },
   sep: {
-    height: 1,
-    backgroundColor: HAIRLINE,
-    marginLeft: 28, // indented to align under icons
+    height:     StyleSheet.hairlineWidth,
+    marginLeft: 28,
   },
 
   /* Rows */
   row: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection:  "row",
+    alignItems:     "center",
     justifyContent: "space-between",
-    paddingVertical: 12,
+    paddingVertical: 13,
   },
-  rowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  rowLabel: {
-    color: BLACK,
-  },
-  rowRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  rowValue: {
-    color: "#4B5563",
-  },
+  rowLeft:  { flexDirection: "row", alignItems: "center", gap: 10 },
+  rowLabel: { fontSize: 15 },
+  rowRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  rowValue: { fontSize: 14 },
 
   /* Pills */
   pill: {
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-    backgroundColor: "#FFF3E0", // soft orange tint
+    paddingVertical:   2,
+    borderRadius:      999,
   },
-  pillText: {
-    color: ORANGE,
-    fontWeight: "700",
-    fontSize: 12,
-  },
+  pillText: { color: ORANGE, fontWeight: "700", fontSize: 12 },
 
-  /* Footer links */
+  /* Footer */
   linkBtn: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    alignItems:    "center",
+    gap:           8,
     paddingVertical: 8,
   },
-  linkText: {
-    color: BLACK,
-    fontSize: 15,
-  },
-  version: {
-    color: "#6B7280",
-    fontSize: 12,
-    marginTop: 4,
-  },
+  linkText: { fontSize: 15 },
+  version:  { color: GREY, fontSize: 12, marginTop: 4 },
 });

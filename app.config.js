@@ -32,6 +32,9 @@ module.exports = {
         NSLocationWhenInUseUsageDescription: "We use your location to show nearby stages.",
         NSLocationAlwaysAndWhenInUseUsageDescription: "We use your location to show nearby stages.",
         NSLocationAlwaysUsageDescription: "We use your location to show nearby stages.",
+        NSCameraUsageDescription: "Allow $(PRODUCT_NAME) to use your camera to take stop photos.",
+        NSPhotoLibraryUsageDescription: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos.",
+        NSPhotoLibraryAddUsageDescription: "Allow $(PRODUCT_NAME) to save photos to your library.",
         ITSAppUsesNonExemptEncryption: false,
       },
     },
@@ -46,7 +49,14 @@ module.exports = {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
-      permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      permissions: [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+      ],
     },
 
     web: {
@@ -57,6 +67,20 @@ module.exports = {
     plugins: [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          photosPermission: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos.",
+          cameraPermission: "Allow $(PRODUCT_NAME) to use your camera to take stop photos.",
+          isAccessMediaLocationEnabled: true,
+        },
+      ],
+      [
+        "expo-location",
+        {
+          locationWhenInUsePermission: "Allow $(PRODUCT_NAME) to use your location to show nearby stops and pick map locations.",
+        },
+      ],
       [
         "react-native-maps",
         {

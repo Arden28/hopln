@@ -82,14 +82,15 @@ export const RouteService = {
   async calculateJourney(
     fromLoc: UnifiedLocation,
     toLoc: UnifiedLocation,
+    maxWalkMeters?: number,
   ): Promise<Route[]> {
-    const payload = {
+    const payload: Record<string, unknown> = {
       from: { lat: fromLoc.lat, lng: fromLoc.lng },
       to:   { lat: toLoc.lat,   lng: toLoc.lng   },
       date: getLocalDate(),
-      // time: "02:30pm",
       time: getLocalTime(),
     };
+    if (maxWalkMeters !== undefined) payload.max_walk_distance = maxWalkMeters;
 
     const data = await fetchApi<{ data: Route[] }>("/journey/calculate", {
       method: "POST",

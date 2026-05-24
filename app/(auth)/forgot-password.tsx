@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthService } from "@/services/auth";
@@ -20,6 +21,7 @@ export default function ForgotPassword() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { setAuth } = useAuthStore();
+  const dark = useColorScheme() === "dark";
 
   const [step, setStep] = useState<"email" | "reset">("email");
   const [email, setEmail] = useState("");
@@ -30,16 +32,15 @@ export default function ForgotPassword() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
 
   const codeRefs = useRef<(TextInput | null)[]>([]);
+  const C = theme(dark);
 
   const submitEmail = async () => {
     setError("");
     setLoading(true);
     try {
       await AuthService.forgotPassword(email);
-      setInfo("A reset code was sent to your registered phone.");
       setStep("reset");
     } catch (e: any) {
       setError(e.message || "Failed to send reset code.");
@@ -76,67 +77,108 @@ export default function ForgotPassword() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#0A0A0A" }}
+      style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[
+          styles.container,
+          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 },
+        ]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <Pressable onPress={() => (step === "reset" ? setStep("email") : router.back())} style={styles.back}>
-          <Ionicons name="arrow-back" size={22} color="#FFF" />
+        <Pressable
+          onPress={() => (step === "reset" ? setStep("email") : router.back())}
+          style={styles.back}
+        >
+          <View style={[styles.backBtn, { backgroundColor: C.inputBg }]}>
+            <Ionicons name="arrow-back" size={20} color={C.text} />
+          </View>
         </Pressable>
 
-        <Text style={styles.title}>{step === "email" ? "Forgot password" : "Reset password"}</Text>
-        <Text style={styles.subtitle}>
-          {step === "email"
-            ? "Enter your email and we'll send a reset code to your phone."
-            : info || "Enter the code from your phone and choose a new password."}
-        </Text>
+        {/* Step indicator */}
+        <View style={styles.stepRow}>
+          <View style={[styles.stepDot, { backgroundColor: C.accent }]} />
+          <View style={[styles.stepLine, { backgroundColor: step === "reset" ? C.accent : C.inputBd }]} />
+          <View style={[styles.stepDot, { backgroundColor: step === "reset" ? C.accent : C.inputBd }]} />
+        </View>
 
-        {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={[styles.badge, { backgroundColor: C.accentBg }]}>
+            <Ionicons
+              name={step === "email" ? "mail-outline" : "lock-closed-outline"}
+              size={28}
+              color={C.accent}
+            />
+          </View>
+          <Text style={[styles.title, { color: C.text }]}>
+            {step === "email" ? "Forgot password?" : "Set new password"}
+          </Text>
+          <Text style={[styles.subtitle, { color: C.textSub }]}>
+            {step === "email"
+              ? "Enter your email and we'll send a reset code to your registered phone."
+              : "Enter the code you received and choose a new password."}
+          </Text>
+        </View>
+
+        {!!error && (
+          <View style={[styles.errorBox, { backgroundColor: C.errBg, borderColor: C.errBd }]}>
+            <Ionicons name="alert-circle-outline" size={16} color={C.errText} />
+            <Text style={[styles.errorText, { color: C.errText }]}>{error}</Text>
+          </View>
+        )}
 
         {step === "email" ? (
           <>
-            <View style={styles.fieldWrap}>
-              <Text style={styles.label}>Email address</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@email.com"
-                placeholderTextColor="#555"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-
-            <Pressable style={[styles.primary, loading && { opacity: 0.6 }]} onPress={submitEmail} disabled={loading}>
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryText}>Send reset code</Text>}
+            <Field
+              label="Email address"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@email.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              C={C}
+            />
+            <Pressable
+              style={[styles.primary, { backgroundColor: C.accent }, loading && styles.btnDisabled]}
+              onPress={submitEmail}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.primaryText}>Send reset code</Text>
+              )}
             </Pressable>
           </>
         ) : (
           <>
-            <View style={styles.fieldWrap}>
-              <Text style={styles.label}>Phone number (to confirm)</Text>
-              <TextInput
-                style={styles.input}
-                value={phone}
-                onChangeText={setPhone}
-                placeholder="+254712345678"
-                placeholderTextColor="#555"
-                keyboardType="phone-pad"
-              />
-            </View>
+            <Field
+              label="Phone number"
+              value={phone}
+              onChangeText={setPhone}
+              placeholder="+254712345678"
+              keyboardType="phone-pad"
+              C={C}
+            />
 
             <View style={styles.fieldWrap}>
-              <Text style={styles.label}>Verification code</Text>
+              <Text style={[styles.label, { color: C.textSub }]}>Verification code</Text>
               <View style={styles.codeRow}>
                 {code.map((digit, i) => (
                   <TextInput
                     key={i}
                     ref={(r) => { codeRefs.current[i] = r; }}
-                    style={styles.codeBox}
+                    style={[
+                      styles.codeBox,
+                      {
+                        backgroundColor: C.inputBg,
+                        borderColor: digit ? C.accent : C.inputBd,
+                        color: C.text,
+                      },
+                    ]}
                     value={digit}
                     onChangeText={(t) => onCodeChange(t, i)}
                     keyboardType="number-pad"
@@ -148,36 +190,45 @@ export default function ForgotPassword() {
             </View>
 
             <View style={styles.fieldWrap}>
-              <Text style={styles.label}>New password</Text>
-              <View style={styles.pwRow}>
+              <Text style={[styles.label, { color: C.textSub }]}>New password</Text>
+              <View style={[styles.pwRow, { backgroundColor: C.inputBg, borderColor: C.inputBd }]}>
                 <TextInput
-                  style={[styles.input, { flex: 1, borderWidth: 0 }]}
+                  style={[styles.pwInput, { color: C.text }]}
                   value={password}
                   onChangeText={setPassword}
                   placeholder="Min. 8 characters"
-                  placeholderTextColor="#555"
+                  placeholderTextColor={C.placeholder}
                   secureTextEntry={!showPw}
                 />
-                <Pressable onPress={() => setShowPw((v) => !v)} style={{ padding: 10 }}>
-                  <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={20} color="#777" />
+                <Pressable onPress={() => setShowPw((v) => !v)} style={styles.eyeBtn}>
+                  <Ionicons
+                    name={showPw ? "eye-off-outline" : "eye-outline"}
+                    size={20}
+                    color={C.textSub}
+                  />
                 </Pressable>
               </View>
             </View>
 
-            <View style={styles.fieldWrap}>
-              <Text style={styles.label}>Confirm password</Text>
-              <TextInput
-                style={styles.input}
-                value={confirm}
-                onChangeText={setConfirm}
-                placeholder="Repeat password"
-                placeholderTextColor="#555"
-                secureTextEntry
-              />
-            </View>
+            <Field
+              label="Confirm password"
+              value={confirm}
+              onChangeText={setConfirm}
+              placeholder="Repeat password"
+              secureTextEntry
+              C={C}
+            />
 
-            <Pressable style={[styles.primary, loading && { opacity: 0.6 }]} onPress={submitReset} disabled={loading}>
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryText}>Reset password</Text>}
+            <Pressable
+              style={[styles.primary, { backgroundColor: C.accent }, loading && styles.btnDisabled]}
+              onPress={submitReset}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.primaryText}>Reset password</Text>
+              )}
             </Pressable>
           </>
         )}
@@ -186,57 +237,120 @@ export default function ForgotPassword() {
   );
 }
 
+function Field({
+  label,
+  C,
+  ...props
+}: { label: string; C: ReturnType<typeof theme> } & React.ComponentProps<typeof TextInput>) {
+  return (
+    <View style={styles.fieldWrap}>
+      <Text style={[styles.label, { color: C.textSub }]}>{label}</Text>
+      <TextInput
+        style={[styles.input, { backgroundColor: C.inputBg, borderColor: C.inputBd, color: C.text }]}
+        placeholderTextColor={C.placeholder}
+        {...props}
+      />
+    </View>
+  );
+}
+
+function theme(dark: boolean) {
+  return {
+    bg:          dark ? "#0F0F0F" : "#FFFFFF",
+    text:        dark ? "#F9FAFB" : "#111827",
+    textSub:     dark ? "#9CA3AF" : "#6B7280",
+    inputBg:     dark ? "#1C1C1E" : "#F3F4F6",
+    inputBd:     dark ? "#2C2C2E" : "#E5E7EB",
+    placeholder: dark ? "#4B5563" : "#9CA3AF",
+    accent:      "#FF6F00",
+    accentBg:    dark ? "rgba(255,111,0,0.12)" : "#FFF7ED",
+    errBg:       dark ? "rgba(220,38,38,0.1)" : "#FEF2F2",
+    errBd:       dark ? "rgba(220,38,38,0.2)" : "#FECACA",
+    errText:     dark ? "#FF6B6B" : "#DC2626",
+  };
+}
+
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 24, gap: 16 },
-  back: { marginBottom: 8 },
-  title: { fontSize: 28, fontWeight: "800", color: "#FFF" },
-  subtitle: { fontSize: 15, color: "#888", marginBottom: 8 },
-  errorBanner: {
-    backgroundColor: "rgba(220,53,69,0.15)",
-    color: "#FF6B6B",
-    padding: 12,
-    borderRadius: 10,
-    fontSize: 14,
-  },
-  fieldWrap: { gap: 6 },
-  label: { color: "#AAA", fontSize: 13 },
-  input: {
-    backgroundColor: "#1A1A1A",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
+  container: { paddingHorizontal: 24, gap: 20 },
+  back: {},
+  backBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  stepRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 0,
+    alignSelf: "flex-start",
+  },
+  stepDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  stepLine: {
+    width: 48,
+    height: 3,
+    borderRadius: 2,
+  },
+  header: { gap: 10 },
+  badge: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  title: { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
+  subtitle: { fontSize: 15, lineHeight: 22 },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  errorText: { flex: 1, fontSize: 14 },
+  fieldWrap: { gap: 8 },
+  label: { fontSize: 13, fontWeight: "500" },
+  input: {
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: "#FFF",
     fontSize: 15,
   },
   pwRow: {
+    height: 52,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1A1A1A",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    paddingLeft: 16,
   },
+  pwInput: { flex: 1, fontSize: 15 },
+  eyeBtn: { paddingHorizontal: 14, height: "100%", justifyContent: "center" },
   codeRow: { flexDirection: "row", gap: 10, justifyContent: "center" },
   codeBox: {
-    width: 44,
-    height: 52,
-    backgroundColor: "#1A1A1A",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 10,
-    color: "#FFF",
-    fontSize: 22,
+    width: 46,
+    height: 58,
+    borderRadius: 14,
+    borderWidth: 2,
+    fontSize: 24,
     fontWeight: "700",
     textAlign: "center",
   },
   primary: {
-    backgroundColor: "#FF6F00",
-    paddingVertical: 16,
-    borderRadius: 14,
+    height: 56,
+    borderRadius: 16,
     alignItems: "center",
-    marginTop: 8,
+    justifyContent: "center",
+    marginTop: 4,
   },
   primaryText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
+  btnDisabled: { opacity: 0.55 },
 });
