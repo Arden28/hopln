@@ -12,29 +12,46 @@
 
 export interface NavStep {
   instruction: string;
-  distance: number;
-  duration: number;
-  location: [number, number]; // [lng, lat]  – GeoJSON convention
-  type?: string;
+  distance:    number;   // metres
+  duration:    number;   // scheduled seconds — used for hybrid transit ETA
+  location:    [number, number]; // [lng, lat] – GeoJSON convention
+  type?:       string;
+  subSteps?:   any;
+  /** Ordered stops along this leg (transit only). Populated by caller. */
+  stops?:      Array<{ name: string; lat: number; lng: number }>;
   /** Populated internally by the engine. Do not set manually. */
-  routeOffset?: number;
+  routeOffset?:  number;
+  /** Populated internally: each stop's position along the route (m). */
+  _stopOffsets?: Array<{ name: string; offset: number }>;
 }
 
-export type EngineStatus = "active" | "off_route" | "arrived";
+export type EngineStatus  = "active" | "off_route" | "rerouting" | "arrived";
+/** How far the user is from the next maneuver. Null when already at final step. */
+export type ApproachPhase = "far" | "near" | "imminent" | null;
 
 export interface EngineResult {
-  status: EngineStatus;
+  status:             EngineStatus;
   /** Index into the steps array the user is currently heading toward. */
-  stepIndex: number;
+  stepIndex:          number;
   remainingDistanceM: number;
   remainingDurationS: number;
-  eta: Date;
+  eta:                Date;
   /** Distance to the *next* step's trigger point along the route. */
   distanceToNextStepM: number;
+  /** Tiered pre-announcement zone based on distanceToNextStepM. */
+  approachPhase:      ApproachPhase;
   /** Route bearing at the user's current projected position (degrees, 0 = north). */
-  routeBearing: number;
+  routeBearing:       number;
   /** Perpendicular distance from user to the nearest route segment (m). */
   distanceFromRouteM: number;
+  /** Stops ahead on the current transit leg. Null when on a walk leg. */
+  stopsRemaining:     number | null;
+  /** Name of the stop the user most recently passed. Null when on a walk leg. */
+  currentStopName:    string | null;
+  /** Mode of the current segment ("WALK", "BUS", etc.). */
+  currentSegmentMode: string | null;
+  /** ETA at each step's endpoint. Index i < stepIndex → new Date(0) (already passed). */
+  stepETAs: Date[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -48,13 +65,17 @@ const OFF_ROUTE_STRIKES  = 3;
 const ARRIVE_M           = 20;
 /** Fallback walking speed when GPS speed is unreliable (m/s). */
 const WALK_SPEED_MPS     = 1.4;
-/** Seconds of GPS speed below which we use the fallback. */
+/** GPS speed below which we use the fallback (m/s). */
 const MIN_RELIABLE_SPEED = 0.5;
-/** How many metres behind our current offset we still search for projections.
- *  Prevents the engine from "snapping backward" on GPS bounces. */
-const LOOKBACK_M         = 80;
+/** Local projection window: metres to look back from last known offset. */
+const SEARCH_BACK_M      = 150;
+/** Local projection window: metres to look ahead from last known offset. */
+const SEARCH_AHEAD_M     = 500;
 /** Early-advance buffer: treat a step as reached when within this many m. */
 const STEP_REACH_M       = 18;
+// Approach-phase thresholds (metres to next maneuver)
+const PHASE_FAR_M        = 300;
+const PHASE_NEAR_M       = 100;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -84,9 +105,9 @@ function haversineM(
  * short enough (< 200 m typically) that the error is well under 1 m.
  */
 function projectOntoSegment(
-  P:  [number, number],
-  A:  [number, number],
-  B:  [number, number],
+  P: [number, number],
+  A: [number, number],
+  B: [number, number],
 ): { t: number; point: [number, number]; distM: number } {
   const [ax, ay] = A;
   const [bx, by] = B;
@@ -112,13 +133,20 @@ function bearingDeg(
   [lng2, lat2]: [number, number],
 ): number {
   const dLng = toRad(lng2 - lng1);
-  const la1 = toRad(lat1);
-  const la2 = toRad(lat2);
+  const la1  = toRad(lat1);
+  const la2  = toRad(lat2);
   const y = Math.sin(dLng) * Math.cos(la2);
   const x =
     Math.cos(la1) * Math.sin(la2) -
     Math.sin(la1) * Math.cos(la2) * Math.cos(dLng);
   return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
+/** True for any transit mode (bus, tram, rail, ferry, subway). */
+function isTransit(type?: string): boolean {
+  if (!type) return false;
+  const t = type.toUpperCase();
+  return t !== "WALK";
 }
 
 // ─── Engine ───────────────────────────────────────────────────────────────────
@@ -132,16 +160,25 @@ export class NavigationEngine {
   private readonly cumDist: number[];
   /** Total route length (m). */
   readonly totalDistM: number;
-  /** Steps with `routeOffset` pre-computed. */
+  /** Steps with `routeOffset` and `_stopOffsets` pre-computed. */
   readonly steps: NavStep[];
 
   private offRouteStrikes = 0;
   /** The furthest distanceAlongRoute we've ever confirmed. Prevents backward snap. */
   private highWaterMark = 0;
 
-  constructor(coords: [number, number][], steps: NavStep[]) {
+  constructor(rawCoords: [number, number][], steps: NavStep[]) {
+    // ── Degenerate route guard: remove consecutive duplicate coordinates ──────
+    const coords: [number, number][] = [rawCoords[0]];
+    for (let i = 1; i < rawCoords.length; i++) {
+      const prev = coords[coords.length - 1];
+      const curr = rawCoords[i];
+      if (curr[0] !== prev[0] || curr[1] !== prev[1]) {
+        coords.push(curr);
+      }
+    }
     if (coords.length < 2) {
-      throw new Error("NavigationEngine: need at least 2 coordinates.");
+      throw new Error("NavigationEngine: need at least 2 distinct coordinates.");
     }
     this.coords = coords;
 
@@ -155,11 +192,15 @@ export class NavigationEngine {
     }
     this.totalDistM = this.cumDist[this.cumDist.length - 1];
 
-    // Pre-compute each step's position along the route
-    this.steps = steps.map((step) => ({
-      ...step,
-      routeOffset: this.computeOffsetForPoint(step.location),
-    }));
+    // Pre-compute each step's position along the route + stop offsets
+    this.steps = steps.map((step) => {
+      const routeOffset = this.computeOffsetForPoint(step.location);
+      const _stopOffsets = (step.stops ?? []).map((s) => ({
+        name:   s.name,
+        offset: this.computeOffsetForPoint([s.lng, s.lat]),
+      }));
+      return { ...step, routeOffset, _stopOffsets };
+    });
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
@@ -179,30 +220,25 @@ export class NavigationEngine {
     return bestOffset;
   }
 
-/**
-   * Project the user onto the polyline using a "Local Search Window".
-   * This prevents frying the JS thread by only scanning the segments
-   * immediately around the user's last known location.
+  /**
+   * Project the user onto the polyline using a local search window.
+   * Only scans segments immediately around the user's last known location
+   * to avoid unnecessary JS thread work on long routes.
    */
   private projectUser(
     pt: [number, number],
     lastConfirmedOffset: number,
   ): { offset: number; distFromRouteM: number; segIdx: number } {
-    
-    // Look up to 150m behind (in case of GPS bounce) and 500m ahead
-    const SEARCH_BACK_M = 150;
-    const SEARCH_AHEAD_M = 500;
     const searchStart = Math.max(0, lastConfirmedOffset - SEARCH_BACK_M);
-    const searchEnd = lastConfirmedOffset + SEARCH_AHEAD_M;
+    const searchEnd   = lastConfirmedOffset + SEARCH_AHEAD_M;
 
     let bestDistM  = Infinity;
     let bestOffset = lastConfirmedOffset;
     let bestSeg    = 0;
 
     for (let i = 0; i < this.coords.length - 1; i++) {
-      // ── O(1) WINDOW OPTIMIZATION ──
-      if (this.cumDist[i + 1] < searchStart) continue; // Not there yet
-      if (this.cumDist[i] > searchEnd) break; // Passed the window, break the loop completely!
+      if (this.cumDist[i + 1] < searchStart) continue;
+      if (this.cumDist[i] > searchEnd) break;
 
       const { t, distM } = projectOntoSegment(pt, this.coords[i], this.coords[i + 1]);
       if (distM < bestDistM) {
@@ -212,22 +248,102 @@ export class NavigationEngine {
       }
     }
 
-    // ── GLOBAL FALLBACK (Teleportation check) ──
-    // If we are massively off route, maybe the user drove out of a tunnel or jumped?
-    // We do a one-time global scan just in case.
+    // Global fallback: user teleported (tunnel exit, long GPS gap)
     if (bestDistM > 100) {
-        bestDistM = Infinity;
-        for (let i = 0; i < this.coords.length - 1; i++) {
-            const { t, distM } = projectOntoSegment(pt, this.coords[i], this.coords[i + 1]);
-            if (distM < bestDistM) {
-                bestDistM = distM;
-                bestOffset = this.cumDist[i] + t * this.segLen[i];
-                bestSeg = i;
-            }
+      bestDistM = Infinity;
+      for (let i = 0; i < this.coords.length - 1; i++) {
+        const { t, distM } = projectOntoSegment(pt, this.coords[i], this.coords[i + 1]);
+        if (distM < bestDistM) {
+          bestDistM  = distM;
+          bestOffset = this.cumDist[i] + t * this.segLen[i];
+          bestSeg    = i;
         }
+      }
     }
 
     return { offset: bestOffset, distFromRouteM: bestDistM, segIdx: bestSeg };
+  }
+
+  /**
+   * Hybrid ETA: transit legs use their scheduled duration (proportionally
+   * for the current leg); walk legs use live GPS speed or the walk fallback.
+   * This avoids the wild swings caused by bus GPS speed at traffic lights.
+   */
+  private computeHybridETA(
+    confirmedOffset: number,
+    stepIndex:       number,
+    speedMps:        number,
+  ): number {
+    const speed = speedMps >= MIN_RELIABLE_SPEED ? speedMps : WALK_SPEED_MPS;
+    let totalS  = 0;
+
+    for (let i = stepIndex; i < this.steps.length; i++) {
+      const step      = this.steps[i];
+      const stepStart = i > 0 ? (this.steps[i - 1].routeOffset ?? 0) : 0;
+      const stepEnd   = step.routeOffset ?? this.totalDistM;
+      const stepDist  = Math.max(0, stepEnd - stepStart);
+
+      // How much of this step is still ahead of the user?
+      const remainFrac = stepDist > 0
+        ? Math.max(0, Math.min(1, (stepEnd - confirmedOffset) / stepDist))
+        : 0;
+
+      if (i === stepIndex) {
+        // Current (partially traversed) step
+        if (isTransit(step.type) && step.duration > 0) {
+          totalS += remainFrac * step.duration;
+        } else {
+          totalS += Math.max(0, stepEnd - confirmedOffset) / speed;
+        }
+      } else {
+        // Future steps — use full scheduled duration for transit, else walk speed
+        if (isTransit(step.type) && step.duration > 0) {
+          totalS += step.duration;
+        } else {
+          totalS += stepDist / speed;
+        }
+      }
+    }
+
+    return totalS;
+  }
+
+  /**
+   * Build per-step ETAs in one pass using the same hybrid logic as computeHybridETA.
+   * Index i holds the Date when the user is expected to reach step i's endpoint.
+   * Steps before newStepIndex are filled with new Date(0) (already passed).
+   */
+  private buildStepETAs(
+    confirmedOffset: number,
+    newStepIndex:    number,
+    speedMps:        number,
+    now:             number,
+  ): Date[] {
+    const speed = speedMps >= MIN_RELIABLE_SPEED ? speedMps : WALK_SPEED_MPS;
+    const etas: Date[] = new Array(this.steps.length).fill(null).map(() => new Date(0));
+    let cumulativeS = 0;
+
+    for (let i = newStepIndex; i < this.steps.length; i++) {
+      const step      = this.steps[i];
+      const stepStart = i > 0 ? (this.steps[i - 1].routeOffset ?? 0) : 0;
+      const stepEnd   = step.routeOffset ?? this.totalDistM;
+      const stepDist  = Math.max(0, stepEnd - stepStart);
+      const remainFrac = stepDist > 0
+        ? Math.max(0, Math.min(1, (stepEnd - confirmedOffset) / stepDist))
+        : 0;
+
+      if (i === newStepIndex) {
+        cumulativeS += isTransit(step.type) && step.duration > 0
+          ? remainFrac * step.duration
+          : Math.max(0, stepEnd - confirmedOffset) / speed;
+      } else {
+        cumulativeS += isTransit(step.type) && step.duration > 0
+          ? step.duration
+          : stepDist / speed;
+      }
+      etas[i] = new Date(now + cumulativeS * 1_000);
+    }
+    return etas;
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -235,27 +351,24 @@ export class NavigationEngine {
   /**
    * Feed the engine a smoothed location update.
    *
-   * @param lng          Smoothed longitude
-   * @param lat          Smoothed latitude
-   * @param speedMps     Smoothed GPS speed (m/s)
-   * @param stepIndex    The step index the caller thinks is current
-   * @returns            Full navigation result
+   * @param lng      Smoothed longitude
+   * @param lat      Smoothed latitude
+   * @param speedMps Smoothed GPS speed (m/s)
+   * @param stepIndex The step index the caller thinks is current
    */
   update(
-    lng: number,
-    lat: number,
-    speedMps: number,
+    lng:       number,
+    lat:       number,
+    speedMps:  number,
     stepIndex: number,
   ): EngineResult {
     const pt: [number, number] = [lng, lat];
 
     // ── 1. Project user onto polyline ──────────────────────────────────────
-    const currentStepOffset = this.steps[stepIndex]?.routeOffset ?? 0;
     const { offset, distFromRouteM, segIdx } = this.projectUser(pt, this.highWaterMark);
 
     // Monotonically advance the high water mark to prevent backward snap
     const confirmedOffset = Math.max(offset, this.highWaterMark);
-    // Only update high water mark if we're clearly moving forward
     if (offset > this.highWaterMark + 2) {
       this.highWaterMark = offset;
     }
@@ -268,9 +381,7 @@ export class NavigationEngine {
     }
     const offRoute = this.offRouteStrikes >= OFF_ROUTE_STRIKES;
 
-    // ── 3. Advance step index based on route offset ────────────────────────
-    //    Walk forward through steps: advance as long as we've passed
-    //    within STEP_REACH_M of the step's trigger offset.
+    // ── 3. Advance step index ──────────────────────────────────────────────
     let newStepIndex = stepIndex;
     for (let i = stepIndex; i < this.steps.length - 1; i++) {
       const nextOffset = this.steps[i + 1].routeOffset ?? this.totalDistM;
@@ -281,24 +392,44 @@ export class NavigationEngine {
       }
     }
 
-    // ── 4. Remaining distance & ETA ────────────────────────────────────────
-    const remainingDistanceM = Math.max(0, this.totalDistM - confirmedOffset);
-    const speed = speedMps >= MIN_RELIABLE_SPEED ? speedMps : WALK_SPEED_MPS;
-    const remainingDurationS = remainingDistanceM / speed;
-    const eta = new Date(Date.now() + remainingDurationS * 1_000);
+    // ── 4. Hybrid ETA ─────────────────────────────────────────────────────
+    const now                 = Date.now();
+    const remainingDurationS  = this.computeHybridETA(confirmedOffset, newStepIndex, speedMps);
+    const remainingDistanceM  = Math.max(0, this.totalDistM - confirmedOffset);
+    const eta                 = new Date(now + remainingDurationS * 1_000);
+    const stepETAs            = this.buildStepETAs(confirmedOffset, newStepIndex, speedMps, now);
 
-    // ── 5. Distance to next step ───────────────────────────────────────────
-    const upcomingStep       = this.steps[newStepIndex];
-    const upcomingStepOffset = upcomingStep?.routeOffset ?? this.totalDistM;
+    // ── 5. Distance to next step + approach phase ──────────────────────────
+    const upcomingStep        = this.steps[newStepIndex];
+    const upcomingStepOffset  = upcomingStep?.routeOffset ?? this.totalDistM;
     const distanceToNextStepM = Math.max(0, upcomingStepOffset - confirmedOffset);
 
-    // ── 6. Route bearing at current position ──────────────────────────────
-    const safeSegIdx = Math.min(segIdx, this.coords.length - 2);
+    let approachPhase: ApproachPhase = null;
+    if (upcomingStep && newStepIndex < this.steps.length - 1) {
+      if      (distanceToNextStepM > PHASE_FAR_M)  approachPhase = "far";
+      else if (distanceToNextStepM > PHASE_NEAR_M) approachPhase = "near";
+      else                                          approachPhase = "imminent";
+    }
+
+    // ── 6. Route bearing ──────────────────────────────────────────────────
+    const safeSegIdx  = Math.min(segIdx, this.coords.length - 2);
     const routeBearing = bearingDeg(this.coords[safeSegIdx], this.coords[safeSegIdx + 1]);
 
-    // ── 7. Arrival check ──────────────────────────────────────────────────
+    // ── 7. Arrival ────────────────────────────────────────────────────────
     const distToEnd = haversineM(pt, this.coords[this.coords.length - 1]);
     const arrived   = distToEnd <= ARRIVE_M || remainingDistanceM <= ARRIVE_M;
+
+    // ── 8. Transit stop tracking ───────────────────────────────────────────
+    let stopsRemaining:  number | null = null;
+    let currentStopName: string | null = null;
+    const currentSegmentMode = upcomingStep?.type ?? null;
+
+    if (isTransit(upcomingStep?.type) && upcomingStep._stopOffsets?.length) {
+      const ahead  = upcomingStep._stopOffsets.filter((s) => s.offset > confirmedOffset);
+      const passed = upcomingStep._stopOffsets.filter((s) => s.offset <= confirmedOffset);
+      stopsRemaining  = ahead.length;
+      currentStopName = passed.length > 0 ? passed[passed.length - 1].name : null;
+    }
 
     return {
       status:             arrived ? "arrived" : offRoute ? "off_route" : "active",
@@ -306,15 +437,38 @@ export class NavigationEngine {
       remainingDistanceM,
       remainingDurationS,
       eta,
+      stepETAs,
       distanceToNextStepM,
+      approachPhase,
       routeBearing,
       distanceFromRouteM: distFromRouteM,
+      stopsRemaining,
+      currentStopName,
+      currentSegmentMode,
     };
   }
 
-  /** Reset the monotonic high-water mark (call when rerouting). */
+  /** Reset progress (call when rerouting or restarting navigation). */
   resetProgress() {
-    this.highWaterMark = 0;
+    this.highWaterMark   = 0;
     this.offRouteStrikes = 0;
+  }
+
+  /**
+   * Advance position by dead-reckoning when GPS is unavailable.
+   * Moves the high-water mark forward using the last known speed.
+   */
+  deadReckon(speedMps: number, elapsedS: number) {
+    const advance = Math.max(0, speedMps * elapsedS);
+    this.highWaterMark = Math.min(this.highWaterMark + advance, this.totalDistM);
+  }
+
+  getHighWaterMark(): number { return this.highWaterMark; }
+  getStrikes(): number { return this.offRouteStrikes; }
+
+  /** Restore engine state from a persisted session. Call after construction. */
+  restore(highWaterMark: number, strikes: number): void {
+    this.highWaterMark   = highWaterMark;
+    this.offRouteStrikes = strikes;
   }
 }

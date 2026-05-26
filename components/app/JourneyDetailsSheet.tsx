@@ -93,6 +93,7 @@ interface JourneyDetailsSheetProps {
   onSave?: (label?: string) => Promise<void>;
   onUnsave?: () => Promise<void>;
   children?: React.ReactNode;
+  scrollRef?: React.RefObject<ScrollView | null>;
 }
 
 export default function JourneyDetailsSheet({
@@ -107,6 +108,7 @@ export default function JourneyDetailsSheet({
   onSave,
   onUnsave,
   children,
+  scrollRef,
 }: JourneyDetailsSheetProps): React.JSX.Element | null {
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const lastY      = useRef(MIN_Y);
@@ -277,6 +279,7 @@ export default function JourneyDetailsSheet({
       {/* ── SCROLLABLE STEPS ── */}
       <View style={s.scroll}>
         <ScrollView
+          ref={scrollRef}
           scrollEnabled={expanded}
           contentContainerStyle={s.scrollContent}
           showsVerticalScrollIndicator={false}

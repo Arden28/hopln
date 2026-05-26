@@ -1,4 +1,4 @@
-import api from "./apiClient";
+import api, { dedupedGet } from "./apiClient";
 
 export type ContributionType =
   | "delay_report"
@@ -52,6 +52,20 @@ export interface CommunityStats {
   badges_preview: Pick<Badge, "slug" | "name" | "icon" | "color">[];
 }
 
+export interface StopReview {
+  id: number;
+  user_id: number;
+  user: { id: number; name: string; avatar: string | null } | null;
+  data: { safety: number; comfort: number; cleanliness: number; text?: string };
+  created_at: string;
+}
+
+export interface StopPhoto {
+  id: number;
+  data: { photo_url: string; mime_type: string };
+  created_at: string;
+}
+
 export interface CreateContributionResult {
   data: Contribution;
   points_awarded: number;
@@ -69,8 +83,10 @@ export interface CreateContributionPayload {
 
 export const ContributionService = {
   async getContributions(): Promise<Contribution[]> {
-    const res = await api.get<{ data: Contribution[] }>("/user/contributions");
-    return res.data.data;
+    return dedupedGet("contributions", async () => {
+      const res = await api.get<{ data: Contribution[] }>("/user/contributions");
+      return res.data.data;
+    });
   },
 
   async createContribution(payload: CreateContributionPayload): Promise<CreateContributionResult> {
@@ -94,17 +110,35 @@ export const ContributionService = {
   },
 
   async getStats(): Promise<CommunityStats> {
-    const res = await api.get<CommunityStats>("/user/community/stats");
-    return res.data;
+    return dedupedGet("community_stats", async () => {
+      const res = await api.get<CommunityStats>("/user/community/stats");
+      return res.data;
+    });
   },
 
   async getBadges(): Promise<{ earned: Badge[]; locked: Badge[] }> {
-    const res = await api.get<{ earned: Badge[]; locked: Badge[] }>("/user/badges");
-    return res.data;
+    return dedupedGet("badges", async () => {
+      const res = await api.get<{ earned: Badge[]; locked: Badge[] }>("/user/badges");
+      return res.data;
+    });
   },
 
   async getLeaderboard(): Promise<{ id: number; name: string; avatar: string | null; points: number }[]> {
     const res = await api.get<{ data: any[] }>("/community/leaderboard");
     return res.data.data;
+  },
+
+  async getStopReviews(stopId: string): Promise<StopReview[]> {
+    const res = await api.get<{ data: StopReview[] }>(`/stops/${stopId}/reviews`);
+    return res.data.data;
+  },
+
+  async getStopPhotos(stopId: string): Promise<StopPhoto[]> {
+    const res = await api.get<{ data: StopPhoto[] }>(`/stops/${stopId}/photos`);
+    return res.data.data;
+  },
+
+  async updateContribution(id: number, data: Record<string, any>): Promise<void> {
+    await api.patch(`/user/contributions/${id}`, { data });
   },
 };

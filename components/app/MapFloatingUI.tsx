@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
+const RED    = "#FF3B30";
 const BLACK  = "#1C1C1E";
 const GREY   = "#8E8E93";
 const WHITE  = "#FFFFFF";
@@ -13,20 +14,28 @@ const BLUE   = "#007AFF";
 const GREEN  = "#34C759";
 
 interface MapFloatingUIProps {
-  onRecenter: () => void;
-  onOpenSearch: () => void;
-  onOpenKwame: () => void;
-  navigating: boolean;
-  onToggleNav: () => void;
-  nextPreview: string | null;
-  nextStep?: Step;
-  showNavSub?: boolean;
-  eta: Date | null;
+  onRecenter:         () => void;
+  onOpenSearch:       () => void;
+  onOpenKwame:        () => void;
+  navigating:         boolean;
+  followMe:           boolean;
+  waitingForBus:      boolean;
+  onToggleNav:        () => void;
+  nextPreview:        string | null;
+  nextStep?:          Step;
+  showNavSub?:        boolean;
+  eta:                Date | null;
   remainingDistanceM: number | null;
-  arrivalSoonShown: boolean;
-  activeJourney: any;
-  onClearJourney: () => void;
-  bottomOffset?: number;
+  distanceToNextStepM?: number | null;
+  navStatus?:         string | null;
+  stopsRemaining?:    number | null;
+  arrivalSoonShown:   boolean;
+  activeJourney:      any;
+  onClearJourney:     () => void;
+  bottomOffset?:      number;
+  gpsLost?:           boolean;
+  currentSpeedKph?:   number;
+  wrongDirection?:    boolean;
 }
 
 function formatEta(date: Date): string {
@@ -37,19 +46,26 @@ function formatEta(date: Date): string {
   return `${h}:${m} ${ampm}`;
 }
 
+/** Compact distance for the "In X m" prefix. */
+function navDist(m: number): string {
+  if (m < 1000) return `${Math.round(m / 10) * 10} m`;
+  return `${(m / 1000).toFixed(1)} km`;
+}
+
 export default function MapFloatingUI({
   onRecenter, onOpenSearch, onOpenKwame,
-  navigating, onToggleNav,
-  nextPreview, nextStep, showNavSub = true, eta, remainingDistanceM, arrivalSoonShown,
-  activeJourney, onClearJourney,
-  bottomOffset = 0,
+  navigating, followMe, waitingForBus, onToggleNav,
+  nextPreview, nextStep, showNavSub = true,
+  eta, remainingDistanceM, distanceToNextStepM, navStatus, stopsRemaining,
+  arrivalSoonShown, activeJourney, onClearJourney,
+  bottomOffset = 0, gpsLost = false, currentSpeedKph, wrongDirection = false,
 }: MapFloatingUIProps): JSX.Element {
-  const insets  = useSafeAreaInsets();
-  const lastTap = useRef(0);
-  const dark    = useColorScheme() === "dark";
-  const cardBg  = dark ? "#1C1C1E" : WHITE;
+  const insets    = useSafeAreaInsets();
+  const lastTap   = useRef(0);
+  const dark      = useColorScheme() === "dark";
+  const cardBg    = dark ? "#1C1C1E" : WHITE;
   const textColor = dark ? "#FFFFFF" : BLACK;
-  const lightBg = dark ? "#2C2C2E" : "#F2F2F7";
+  const lightBg   = dark ? "#2C2C2E" : "#F2F2F7";
   const softOrange = dark ? "rgba(255,111,0,0.18)" : "#FFF3E0";
 
   const handleNavBtn = () => {
@@ -63,6 +79,26 @@ export default function MapFloatingUI({
     }
   };
 
+  // ── Build instruction text with "In X m" prefix ───────────────────────────
+  const showCountdown = distanceToNextStepM != null && distanceToNextStepM > 40;
+  const instructionText = nextPreview
+    ? showCountdown
+      ? `In ${navDist(distanceToNextStepM!)} — ${nextPreview}`
+      : nextPreview
+    : null;
+
+  // ── Sub-text: stops remaining (transit) or distance remaining (walk) ──────
+  const subText = (() => {
+    if (stopsRemaining != null && stopsRemaining > 0) {
+      return `${stopsRemaining} stop${stopsRemaining === 1 ? "" : "s"} remaining`;
+    }
+    if (showNavSub && remainingDistanceM != null) {
+      return `${mToNice(remainingDistanceM)} remaining`;
+    }
+    return null;
+  })();
+
+  // ── Top banner priority: arrived > off-route > navigating > journey > idle ─
   let topContent: React.ReactNode;
 
   if (arrivalSoonShown) {
@@ -72,19 +108,64 @@ export default function MapFloatingUI({
         <Text style={s.arrivalText}>{"You've arrived!"}</Text>
       </View>
     );
-  } else if (navigating && nextPreview) {
+  } else if (navigating && (navStatus === "off_route" || navStatus === "rerouting")) {
+    const rerouting = navStatus === "rerouting";
+    topContent = (
+      <View style={s.offRouteBanner}>
+        <View style={s.navIconBox}>
+          <Ionicons name={rerouting ? "refresh" : "warning"} size={20} color={WHITE} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.navInstruction} numberOfLines={1}>
+            {rerouting ? "Recalculating…" : "Off route"}
+          </Text>
+          <Text style={s.navSub}>
+            {rerouting ? "Finding a new route" : "Move back toward the route"}
+          </Text>
+        </View>
+      </View>
+    );
+  } else if (wrongDirection && navigating) {
+    topContent = (
+      <View style={s.offRouteBanner}>
+        <View style={s.navIconBox}>
+          <Ionicons name="arrow-back-circle" size={20} color={WHITE} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.navInstruction}>Wrong direction</Text>
+          <Text style={s.navSub}>Turn around to get back on route</Text>
+        </View>
+      </View>
+    );
+  } else if (navigating && instructionText) {
     topContent = (
       <View style={s.navBanner}>
         <View style={s.navIconBox}>
           <Ionicons name={nextStep ? stepIcon(nextStep.type) : "navigate"} size={20} color={WHITE} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={s.navInstruction} numberOfLines={1}>{nextPreview}</Text>
-          {showNavSub && remainingDistanceM != null && (
-            <Text style={s.navSub}>{mToNice(remainingDistanceM)} remaining</Text>
-          )}
+          <Text style={s.navInstruction} numberOfLines={1}>{instructionText}</Text>
+          {subText && <Text style={s.navSub}>{subText}</Text>}
         </View>
         {eta && <Text style={s.navEta}>{formatEta(eta)}</Text>}
+      </View>
+    );
+  } else if (waitingForBus && activeJourney) {
+    const seg       = activeJourney.route?.segments?.find((s: any) => s.mode !== "WALK");
+    const routeName = seg?.route_name ?? "";
+    const boardStop = seg?.from?.name ?? "boarding stop";
+    topContent = (
+      <View style={[s.journeyBanner, { backgroundColor: cardBg }]}>
+        <Ionicons name="time-outline" size={20} color={BLUE} />
+        <View style={{ flex: 1 }}>
+          <Text style={[s.journeyText, { color: textColor }]} numberOfLines={1}>
+            Waiting for Line {routeName}
+          </Text>
+          <Text style={[s.waitingSub, { color: GREY }]} numberOfLines={1}>At {boardStop}</Text>
+        </View>
+        <Pressable onPress={onClearJourney} hitSlop={12} style={[s.bannerClose, { backgroundColor: lightBg }]}>
+          <Ionicons name="close" size={15} color={GREY} />
+        </Pressable>
       </View>
     );
   } else if (activeJourney) {
@@ -114,6 +195,9 @@ export default function MapFloatingUI({
     );
   }
 
+  // ── Recenter button: locked (camera follows user) vs unlocked (user panned) ─
+  const cameraUnlocked = navigating && !followMe;
+
   return (
     <>
       <View style={[s.topArea, { paddingTop: (insets.top || 44) + 8 }]}>
@@ -121,25 +205,43 @@ export default function MapFloatingUI({
       </View>
 
       <View style={[s.stack, { bottom: (insets.bottom || 0) + 36 + bottomOffset }]}>
-        <Pressable
-          onPress={handleNavBtn}
-          style={[
-            s.navBtn,
-            { backgroundColor: cardBg },
-            dark && {
-              borderTopColor:    "rgba(255,255,255,0.08)",
-              borderBottomColor: "rgba(0,0,0,0.30)",
-              borderLeftColor:   "rgba(0,0,0,0.12)",
-              borderRightColor:  "rgba(0,0,0,0.12)",
-            },
-          ]}
-        >
-          <Ionicons
-            name={navigating ? "compass" : "navigate"}
-            size={22}
-            color={navigating ? BLUE : ORANGE}
-          />
-        </Pressable>
+        {gpsLost && navigating && (
+          <View style={s.gpsLostPill}>
+            <Ionicons name="warning-outline" size={12} color={WHITE} />
+            <Text style={s.gpsLostText}>GPS lost</Text>
+          </View>
+        )}
+        {navigating && currentSpeedKph != null && currentSpeedKph > 1 && (
+          <View style={[s.speedPill, { backgroundColor: cardBg }]}>
+            <Text style={[s.speedVal, { color: textColor }]}>{currentSpeedKph}</Text>
+            <Text style={s.speedUnit}>km/h</Text>
+          </View>
+        )}
+        <View>
+          <Pressable
+            onPress={handleNavBtn}
+            style={[
+              s.navBtn,
+              { backgroundColor: cameraUnlocked ? BLUE : cardBg },
+              dark && !cameraUnlocked && {
+                borderTopColor:    "rgba(255,255,255,0.08)",
+                borderBottomColor: "rgba(0,0,0,0.30)",
+                borderLeftColor:   "rgba(0,0,0,0.12)",
+                borderRightColor:  "rgba(0,0,0,0.12)",
+              },
+            ]}
+          >
+            <Ionicons
+              name={cameraUnlocked ? "locate" : navigating ? "compass" : "navigate"}
+              size={22}
+              color={cameraUnlocked ? WHITE : navigating ? BLUE : ORANGE}
+            />
+          </Pressable>
+          {/* Dot indicator: camera is unlocked from user position */}
+          {cameraUnlocked && (
+            <View style={s.unlockedDot} />
+          )}
+        </View>
       </View>
     </>
   );
@@ -229,6 +331,16 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     ...mapShadow,
   },
+  offRouteBanner: {
+    flexDirection:    "row",
+    alignItems:       "center",
+    gap:              12,
+    backgroundColor:  RED,
+    borderRadius:     16,
+    paddingVertical:  13,
+    paddingHorizontal: 14,
+    ...mapShadow,
+  },
   navIconBox: {
     width:          36,
     height:         36,
@@ -252,26 +364,27 @@ const s = StyleSheet.create({
     ...mapShadow,
   },
   arrivalText: { fontSize: 16, fontWeight: "700", color: GREEN },
+  waitingSub:  { fontSize: 12, marginTop: 1 },
 
   stack: {
-    position:  "absolute",
-    right:     16,
+    position:   "absolute",
+    right:      16,
     alignItems: "center",
     gap:        12,
-    zIndex:     5,
+    zIndex:     25,
   },
 
   navBtn: {
-    width:        52,
-    height:       52,
-    borderRadius: 26,
-    alignItems:   "center",
+    width:          52,
+    height:         52,
+    borderRadius:   26,
+    alignItems:     "center",
     justifyContent: "center",
-    shadowColor:  "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 4,
-    elevation:    12,
+    shadowColor:    "#000",
+    shadowOffset:   { width: 0, height: 6 },
+    shadowOpacity:  0.22,
+    shadowRadius:   4,
+    elevation:      12,
     borderTopWidth:    1,
     borderTopColor:    "rgba(255,255,255,0.9)",
     borderBottomWidth: 2,
@@ -281,20 +394,31 @@ const s = StyleSheet.create({
     borderRightWidth:  StyleSheet.hairlineWidth,
     borderRightColor:  "rgba(0,0,0,0.05)",
   },
+  unlockedDot: {
+    position:        "absolute",
+    top:             2,
+    right:           2,
+    width:           10,
+    height:          10,
+    borderRadius:    5,
+    backgroundColor: ORANGE,
+    borderWidth:     2,
+    borderColor:     WHITE,
+  },
 
   nearBtn: {
-    width:        52,
-    height:       52,
-    borderRadius: 16,
-    alignItems:   "center",
+    width:          52,
+    height:         52,
+    borderRadius:   16,
+    alignItems:     "center",
     justifyContent: "center",
-    shadowColor:  "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation:    5,
-    borderWidth:  StyleSheet.hairlineWidth,
-    borderColor:  "rgba(0,0,0,0.06)",
+    shadowColor:    "#000",
+    shadowOpacity:  0.12,
+    shadowRadius:   6,
+    shadowOffset:   { width: 0, height: 3 },
+    elevation:      5,
+    borderWidth:    StyleSheet.hairlineWidth,
+    borderColor:    "rgba(0,0,0,0.06)",
   },
   badge: {
     position:       "absolute",
@@ -311,4 +435,25 @@ const s = StyleSheet.create({
     borderColor:    WHITE,
   },
   badgeText: { color: WHITE, fontSize: 10, fontWeight: "700", lineHeight: 12 },
+
+  gpsLostPill: {
+    flexDirection:    "row",
+    alignItems:       "center",
+    gap:              4,
+    backgroundColor:  RED,
+    borderRadius:     999,
+    paddingVertical:  5,
+    paddingHorizontal: 10,
+  },
+  gpsLostText: { color: WHITE, fontSize: 11, fontWeight: "600" },
+
+  speedPill: {
+    alignItems:       "center",
+    borderRadius:     12,
+    paddingVertical:  6,
+    paddingHorizontal: 10,
+    ...mapShadow,
+  },
+  speedVal:  { fontSize: 15, fontWeight: "700" },
+  speedUnit: { fontSize: 10, color: GREY, fontWeight: "500", marginTop: -1 },
 });

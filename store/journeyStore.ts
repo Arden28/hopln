@@ -27,11 +27,13 @@ interface JourneyState {
     toLoc: UnifiedLocation,
     route: Route,
   ) => void;
+  /** Replace the active route without touching tripStatus (used during re-routing). */
+  updateRoute: (route: Route) => void;
   setTripStatus: (status: TripStatus) => void;
   clearJourney: () => void;
 }
 
-export const useJourneyStore = create<JourneyState>((set) => ({
+export const useJourneyStore = create<JourneyState>((set, get) => ({
   activeJourney: null,
   tripStatus: "IDLE",
   setJourney: (fromLoc, toLoc, route) =>
@@ -39,6 +41,10 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       activeJourney: { fromLoc, toLoc, route },
       tripStatus: "WAITING_FOR_BUS",
     }),
+  updateRoute: (route) => {
+    const j = get().activeJourney;
+    if (j) set({ activeJourney: { ...j, route } });
+  },
   setTripStatus: (status) => set({ tripStatus: status }),
   clearJourney: () => set({ activeJourney: null, tripStatus: "IDLE" }),
 }));

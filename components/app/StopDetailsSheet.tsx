@@ -1,8 +1,11 @@
 // components/app/StopDetailsSheet.tsx
+import { ContributionService, StopPhoto, StopReview } from "@/services/contribution";
 import { useContributionStore } from "@/store/contributionStore";
 import { useSavedStore } from "@/store/savedStore";
 import { StopRoute, StopService } from "@/services/stop";
+import { useAuthStore } from "@/store/authStore";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -31,6 +34,7 @@ const ORANGE = "#FF6F00";
 const GREEN  = "#10B981";
 const RED    = "#EF4444";
 const GREY   = "#8E8E93";
+const AMBER  = "#F59E0B";
 
 const SCREEN_H = Dimensions.get("window").height;
 const MAX_Y    = SCREEN_H * 0.06;
@@ -52,6 +56,7 @@ function makeC(dark: boolean) {
     softBlue:    dark ? "rgba(59,130,246,0.15)" : "#EFF6FF",
     softPurple:  dark ? "rgba(139,92,246,0.15)" : "#F5F3FF",
     sheetBg:     dark ? "#1C1C1E" : "#FFFFFF",
+    input:       dark ? "#3A3A3C" : "#F3F4F6",
   };
 }
 
@@ -330,9 +335,9 @@ function DelaySheet({
   const { submit } = useContributionStore();
 
   const SEVS: { key: "minor" | "major" | "cancelled"; label: string; color: string }[] = [
-    { key: "minor",     label: "Minor",     color: "#F59E0B" },
-    { key: "major",     label: "Major",     color: RED       },
-    { key: "cancelled", label: "Cancelled", color: GREY      },
+    { key: "minor",     label: "Minor",     color: AMBER },
+    { key: "major",     label: "Major",     color: RED   },
+    { key: "cancelled", label: "Cancelled", color: GREY  },
   ];
 
   const handleSubmit = async () => {
@@ -358,18 +363,18 @@ function DelaySheet({
     <ScrollView contentContainerStyle={[ms.body, { gap: 0 }]} keyboardShouldPersistTaps="handled">
       <Text style={[ms.label, { color: C.sub, marginBottom: 8 }]}>SEVERITY</Text>
       <View style={[ms.pillRow, { marginBottom: 18 }]}>
-        {SEVS.map((s) => (
+        {SEVS.map((sv) => (
           <Pressable
-            key={s.key}
-            onPress={() => setSeverity(s.key)}
+            key={sv.key}
+            onPress={() => setSeverity(sv.key)}
             style={[
               ms.pill,
-              { borderColor: severity === s.key ? s.color : C.border },
-              severity === s.key && { backgroundColor: s.color + "18" },
+              { borderColor: severity === sv.key ? sv.color : C.border },
+              severity === sv.key && { backgroundColor: sv.color + "18" },
             ]}
           >
-            <Text style={[ms.pillText, { color: severity === s.key ? s.color : C.sub }]}>
-              {s.label}
+            <Text style={[ms.pillText, { color: severity === sv.key ? sv.color : C.sub }]}>
+              {sv.label}
             </Text>
           </Pressable>
         ))}
@@ -401,23 +406,32 @@ function ReviewSheet({
   stop,
   onClose,
   C,
+  existingReview,
 }: {
   stop: Stop;
   onClose: () => void;
   C: ReturnType<typeof makeC>;
+  existingReview?: StopReview;
 }) {
-  const [safety, setSafety]       = useState(0);
-  const [comfort, setComfort]     = useState(0);
-  const [clean, setClean]         = useState(0);
-  const [text, setText]           = useState("");
-  const [loading, setLoading]     = useState(false);
+  const [safety, setSafety]   = useState(existingReview?.data.safety ?? 0);
+  const [comfort, setComfort] = useState(existingReview?.data.comfort ?? 0);
+  const [clean, setClean]     = useState(existingReview?.data.cleanliness ?? 0);
+  const [text, setText]       = useState(existingReview?.data.text ?? "");
+  const [loading, setLoading] = useState(false);
   const { submit } = useContributionStore();
+
+  useEffect(() => {
+    setSafety(existingReview?.data.safety ?? 0);
+    setComfort(existingReview?.data.comfort ?? 0);
+    setClean(existingReview?.data.cleanliness ?? 0);
+    setText(existingReview?.data.text ?? "");
+  }, [existingReview]);
 
   const StarRating = ({ value, onSet }: { value: number; onSet: (n: number) => void }) => (
     <View style={ms.stars}>
       {[1, 2, 3, 4, 5].map((n) => (
         <Pressable key={n} onPress={() => onSet(n)} hitSlop={6}>
-          <Ionicons name={n <= value ? "star" : "star-outline"} size={24} color={n <= value ? "#F59E0B" : C.sub} />
+          <Ionicons name={n <= value ? "star" : "star-outline"} size={24} color={n <= value ? AMBER : C.sub} />
         </Pressable>
       ))}
     </View>
@@ -432,6 +446,7 @@ function ReviewSheet({
     try {
       const res = await submit({
         type: "stop_review",
+        stop_id: stop.id,
         title: `Review: ${stop.name}`,
         data: { safety, comfort, cleanliness: clean, text: text.trim() || undefined },
       });
@@ -445,6 +460,8 @@ function ReviewSheet({
       setLoading(false);
     }
   };
+
+  const isEdit = !!existingReview;
 
   return (
     <ScrollView contentContainerStyle={ms.body} keyboardShouldPersistTaps="handled">
@@ -478,10 +495,14 @@ function ReviewSheet({
         maxLength={400}
       />
 
-      <Text style={[ms.hint, { color: C.sub }]}>Awards +10 Safiri Points immediately</Text>
+      <Text style={[ms.hint, { color: C.sub }]}>
+        {isEdit ? "Updates your existing review" : "Awards +10 Safiri Points immediately"}
+      </Text>
 
       <Pressable style={[ms.submitBtn, loading && { opacity: 0.6 }]} onPress={handleSubmit} disabled={loading}>
-        {loading ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={ms.submitText}>Submit Review</Text>}
+        {loading
+          ? <ActivityIndicator color="#FFF" size="small" />
+          : <Text style={ms.submitText}>{isEdit ? "Update Review" : "Submit Review"}</Text>}
       </Pressable>
     </ScrollView>
   );
@@ -691,38 +712,6 @@ const chip = StyleSheet.create({
   label: { fontSize: 13, fontWeight: "600" },
 });
 
-// ── Photo placeholder tile ───────────────────────────────────────────────────
-function PhotoPlaceholderTile({ dark, onPress }: { dark: boolean; onPress: () => void }) {
-  const bg = dark ? "#2C2C2E" : "#F3F4F6";
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [ph.tile, { backgroundColor: bg, opacity: pressed ? 0.7 : 1 }]}
-    >
-      <View style={ph.inner}>
-        <Ionicons name="camera" size={20} color={ORANGE} />
-        <Text style={ph.label}>Add photo</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-const ph = StyleSheet.create({
-  tile: {
-    width:  110,
-    height: 82,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: ORANGE + "60",
-  },
-  inner: { alignItems: "center", gap: 4 },
-  label: { fontSize: 11, color: ORANGE, fontWeight: "600" },
-});
-
 // ── Section header ───────────────────────────────────────────────────────────
 function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -799,6 +788,155 @@ const cr = StyleSheet.create({
   pts:   { fontSize: 11, fontWeight: "700", color: GREEN },
 });
 
+// ── Aggregate rating summary ─────────────────────────────────────────────────
+function AggregateRating({ reviews, C }: { reviews: StopReview[]; C: ReturnType<typeof makeC> }) {
+  if (reviews.length === 0) return null;
+  const avg = (key: "safety" | "comfort" | "cleanliness") =>
+    reviews.reduce((sum, r) => sum + (r.data[key] ?? 0), 0) / reviews.length;
+
+  const categories: { label: string; key: "safety" | "comfort" | "cleanliness" }[] = [
+    { label: "Safety",      key: "safety"      },
+    { label: "Comfort",     key: "comfort"     },
+    { label: "Cleanliness", key: "cleanliness" },
+  ];
+
+  return (
+    <View style={[ar.card, { backgroundColor: C.card, borderColor: C.border }]}>
+      <Text style={[ar.heading, { color: C.text }]}>
+        {reviews.length} {reviews.length === 1 ? "Review" : "Reviews"}
+      </Text>
+      {categories.map((cat, i) => {
+        const val = avg(cat.key);
+        return (
+          <View key={cat.key}>
+            {i > 0 && <View style={[ar.divider, { backgroundColor: C.border }]} />}
+            <View style={ar.row}>
+              <Text style={[ar.label, { color: C.sub }]}>{cat.label}</Text>
+              <View style={[ar.barBg, { backgroundColor: C.input }]}>
+                <View style={[ar.barFill, { width: `${(val / 5) * 100}%` as any }]} />
+              </View>
+              <Text style={[ar.score, { color: C.text }]}>{val.toFixed(1)}</Text>
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const ar = StyleSheet.create({
+  card:    { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden", marginBottom: 14 },
+  heading: { fontSize: 13, fontWeight: "700", paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4 },
+  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 14 },
+  row:     { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  label:   { fontSize: 13, width: 88 },
+  barBg:   { flex: 1, height: 6, borderRadius: 3, overflow: "hidden" },
+  barFill: { height: "100%", backgroundColor: ORANGE, borderRadius: 3 },
+  score:   { fontSize: 13, fontWeight: "600", width: 28, textAlign: "right" },
+});
+
+// ── Review card ──────────────────────────────────────────────────────────────
+function ReviewCard({
+  review,
+  isOwn = false,
+  onEdit,
+  C,
+}: {
+  review: StopReview;
+  isOwn?: boolean;
+  onEdit?: () => void;
+  C: ReturnType<typeof makeC>;
+}) {
+  const name     = review.user?.name ?? "Anonymous";
+  const initials = name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const avatar   = review.user?.avatar;
+  const showImg  = avatar && !avatar.startsWith("data:");
+
+  const date = new Date(review.created_at);
+  const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+  const MiniStars = ({ value }: { value: number }) => (
+    <View style={rv.miniStars}>
+      {[1,2,3,4,5].map((n) => (
+        <Ionicons key={n} name={n <= value ? "star" : "star-outline"} size={11} color={n <= value ? AMBER : C.sub} />
+      ))}
+    </View>
+  );
+
+  return (
+    <View style={[rv.card, { backgroundColor: C.card, borderColor: C.border }, isOwn && rv.ownCard]}>
+      <View style={rv.header}>
+        <View style={rv.avatarRow}>
+          {showImg ? (
+            <Image source={{ uri: avatar }} style={rv.avatar} contentFit="cover" />
+          ) : (
+            <View style={[rv.avatar, { backgroundColor: ORANGE, alignItems: "center", justifyContent: "center" }]}>
+              <Text style={rv.initials}>{initials}</Text>
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={[rv.name, { color: C.text }]}>{name}</Text>
+            <Text style={[rv.date, { color: C.sub }]}>{dateStr}</Text>
+          </View>
+        </View>
+        {isOwn && (
+          <View style={rv.ownBadgeRow}>
+            <View style={rv.ownBadge}>
+              <Text style={rv.ownBadgeText}>Your Review</Text>
+            </View>
+            {onEdit && (
+              <Pressable style={rv.editBtn} onPress={onEdit} hitSlop={8}>
+                <Ionicons name="create-outline" size={14} color={ORANGE} />
+                <Text style={rv.editBtnText}>Edit</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+
+      <View style={[rv.ratingGrid, { borderTopColor: C.border }]}>
+        {([
+          { label: "Safety",      key: "safety"      as const },
+          { label: "Comfort",     key: "comfort"     as const },
+          { label: "Cleanliness", key: "cleanliness" as const },
+        ]).map((cat) => (
+          <View key={cat.key} style={rv.ratingItem}>
+            <Text style={[rv.ratingLbl, { color: C.sub }]}>{cat.label}</Text>
+            <MiniStars value={review.data[cat.key] ?? 0} />
+          </View>
+        ))}
+      </View>
+
+      {review.data.text ? (
+        <Text style={[rv.comment, { color: C.text, borderTopColor: C.border }]}>
+          {review.data.text}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+const rv = StyleSheet.create({
+  card:        { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden", marginBottom: 10 },
+  ownCard:     { borderColor: ORANGE + "60" },
+  header:      { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", padding: 12 },
+  avatarRow:   { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  avatar:      { width: 36, height: 36, borderRadius: 18 },
+  initials:    { color: "#FFF", fontWeight: "700", fontSize: 13 },
+  name:        { fontSize: 14, fontWeight: "600" },
+  date:        { fontSize: 11, marginTop: 1 },
+  ownBadgeRow: { alignItems: "flex-end", gap: 6 },
+  ownBadge:    { backgroundColor: ORANGE + "18", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  ownBadgeText:{ fontSize: 10, fontWeight: "700", color: ORANGE },
+  editBtn:     { flexDirection: "row", alignItems: "center", gap: 4 },
+  editBtnText: { fontSize: 12, fontWeight: "600", color: ORANGE },
+  ratingGrid:  { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 10, paddingHorizontal: 12, gap: 6 },
+  ratingItem:  { flex: 1, alignItems: "center", gap: 4 },
+  ratingLbl:   { fontSize: 10, fontWeight: "600" },
+  miniStars:   { flexDirection: "row", gap: 1 },
+  comment:     { fontSize: 13, lineHeight: 19, padding: 12, borderTopWidth: StyleSheet.hairlineWidth },
+});
+
 // ── DEFAULT_LISTS & LIST_LABEL ───────────────────────────────────────────────
 const DEFAULT_LISTS = [
   { key: "favorites",    label: "Favorites"    },
@@ -830,12 +968,19 @@ export default function StopDetailsSheet({
   const C      = makeC(dark);
   const router = useRouter();
 
+  const { user } = useAuthStore();
   const { places, addPlace, removePlace, customLists } = useSavedStore();
   const savedEntry = places.find((p) => p.place_id === stop.id && p.pin === null);
-  const [saving, setSaving]   = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [routes, setRoutes]               = useState<StopRoute[]>([]);
   const [routesLoading, setRoutesLoading] = useState(true);
+
+  const [activeTab, setActiveTab]                 = useState<"info" | "reviews">("info");
+  const [reviews, setReviews]                     = useState<StopReview[]>([]);
+  const [reviewsLoading, setReviewsLoading]       = useState(false);
+  const [photos, setPhotos]                       = useState<StopPhoto[]>([]);
+  const [photosLoading, setPhotosLoading]         = useState(false);
 
   const [activeSheet, setActiveSheet] = useState<"delay" | "review" | "edit" | null>(null);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
@@ -883,6 +1028,7 @@ export default function StopDetailsSheet({
     Animated.spring(translateY, { toValue: MIN_Y, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
     lastY.current = MIN_Y;
     setExpanded(false);
+    setActiveTab("info");
   }, [stop.id, translateY]);
 
   useEffect(() => {
@@ -891,7 +1037,28 @@ export default function StopDetailsSheet({
       .then((d) => setRoutes(d.routes))
       .catch(() => setRoutes([]))
       .finally(() => setRoutesLoading(false));
+
+    setReviewsLoading(true);
+    ContributionService.getStopReviews(stop.id)
+      .then(setReviews)
+      .catch(() => setReviews([]))
+      .finally(() => setReviewsLoading(false));
+
+    setPhotosLoading(true);
+    ContributionService.getStopPhotos(stop.id)
+      .then(setPhotos)
+      .catch(() => setPhotos([]))
+      .finally(() => setPhotosLoading(false));
   }, [stop.id]);
+
+  const refreshReviews = () => {
+    ContributionService.getStopReviews(stop.id).then(setReviews).catch(() => {});
+  };
+
+  const handleReviewClose = () => {
+    setActiveSheet(null);
+    refreshReviews();
+  };
 
   // ── Save helpers ──────────────────────────────────────────────────────────
   const saveToList = (listKey: string) => {
@@ -955,6 +1122,9 @@ export default function StopDetailsSheet({
     });
   };
 
+  const myReview = reviews.find((r) => r.user_id === user?.id);
+  const hasReview = !!myReview;
+
   return (
     <>
       <Animated.View
@@ -989,51 +1159,32 @@ export default function StopDetailsSheet({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.chipsRow}
           >
-            <Chip
-              icon="navigate-outline"
-              label="Directions"
-              color={ORANGE}
-              onPress={() => {}}
-            />
+            <Chip icon="navigate-outline" label="Directions" color={ORANGE} onPress={() => {}} />
             {savedEntry ? (
               <>
-                <Chip
-                  icon="bookmark"
-                  label={savedListLabel}
-                  color={GREEN}
-                  onPress={handleChangeList}
-                />
-                <Chip
-                  icon="bookmark-outline"
-                  label="Remove"
-                  color={RED}
-                  onPress={handleUnsave}
-                />
+                <Chip icon="bookmark"         label={savedListLabel}        color={GREEN} onPress={handleChangeList} />
+                <Chip icon="bookmark-outline" label="Remove"                color={RED}   onPress={handleUnsave} />
               </>
             ) : (
-              <Chip
-                icon="bookmark-outline"
-                label={saving ? "Saving…" : "Save"}
-                color={ORANGE}
-                onPress={handleSave}
-                disabled={saving}
-              />
+              <Chip icon="bookmark-outline" label={saving ? "Saving…" : "Save"} color={ORANGE} onPress={handleSave} disabled={saving} />
             )}
-            <Chip
-              icon="camera-outline"
-              label="Add Photo"
-              color="#8B5CF6"
-              onPress={goToAddPhoto}
-            />
-            <Chip
-              icon="time-outline"
-              label="Delay"
-              color={RED}
-              onPress={() => setActiveSheet("delay")}
-            />
+            <Chip icon="camera-outline" label="Add Photo" color="#8B5CF6" onPress={goToAddPhoto} />
+            <Chip icon="time-outline"   label="Delay"     color={RED}     onPress={() => setActiveSheet("delay")} />
           </ScrollView>
 
-          <View style={[s.divider, { backgroundColor: C.border }]} />
+          {/* ── TAB BAR ── */}
+          <View style={[s.tabBar, { borderBottomColor: C.border }]}>
+            {(["info", "reviews"] as const).map((tab) => (
+              <Pressable key={tab} style={s.tabItem} onPress={() => setActiveTab(tab)}>
+                <Text style={[s.tabLabel, { color: activeTab === tab ? ORANGE : C.sub }]}>
+                  {tab === "info"
+                    ? "Info"
+                    : `Reviews${reviews.length > 0 ? ` (${reviews.length})` : ""}`}
+                </Text>
+                {activeTab === tab && <View style={s.tabUnderline} />}
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         {/* ── SCROLLABLE CONTENT ── */}
@@ -1046,77 +1197,152 @@ export default function StopDetailsSheet({
             bounces={false}
             style={{ flex: 1 }}
           >
-            {/* Routes */}
-            <SectionTitle title="Routes passing by" />
-            {routesLoading ? (
-              <ActivityIndicator size="small" color={ORANGE} style={{ alignSelf: "flex-start" }} />
-            ) : routes.length > 0 ? (
-              <View style={s.routesRow}>
-                {routes.map((r) => (
-                  <View key={r.id} style={[s.routeBadge, { backgroundColor: C.bg, borderColor: C.border }]}>
-                    <Ionicons name="bus-outline" size={11} color={C.sub} />
-                    <Text style={[s.routeText, { color: C.text }]}>{r.short_name}</Text>
+            {/* ── INFO TAB ── */}
+            {activeTab === "info" && (
+              <>
+                {/* Routes */}
+                <SectionTitle title="Routes passing by" />
+                {routesLoading ? (
+                  <ActivityIndicator size="small" color={ORANGE} style={{ alignSelf: "flex-start" }} />
+                ) : routes.length > 0 ? (
+                  <View style={s.routesRow}>
+                    {routes.map((r) => (
+                      <View key={r.id} style={[s.routeBadge, { backgroundColor: C.bg, borderColor: C.border }]}>
+                        <Ionicons name="bus-outline" size={11} color={C.sub} />
+                        <Text style={[s.routeText, { color: C.text }]}>{r.short_name}</Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={s.emptyNote}>No route data available.</Text>
+                ) : (
+                  <Text style={s.emptyNote}>No route data available.</Text>
+                )}
+
+                {/* Photos */}
+                <SectionTitle
+                  title="Photos"
+                  sub={
+                    photos.length > 0
+                      ? `${photos.length} photo${photos.length !== 1 ? "s" : ""}`
+                      : "Be the first to document this stop"
+                  }
+                />
+                {photosLoading ? (
+                  <ActivityIndicator size="small" color={ORANGE} style={{ alignSelf: "flex-start" }} />
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {photos.map((p) => (
+                      <Image
+                        key={p.id}
+                        source={{ uri: p.data.photo_url }}
+                        style={s.photoTile}
+                        contentFit="cover"
+                      />
+                    ))}
+                    {/* Add Photo placeholder tile */}
+                    <Pressable
+                      onPress={goToAddPhoto}
+                      style={({ pressed }) => [s.photoPlaceholder, { opacity: pressed ? 0.7 : 1, borderColor: ORANGE + "60" }]}
+                    >
+                      <Ionicons name="camera" size={20} color={ORANGE} />
+                      <Text style={s.photoPlaceholderText}>Add photo</Text>
+                    </Pressable>
+                  </ScrollView>
+                )}
+
+                {/* Community contributions */}
+                <SectionTitle title="Contribute" sub="Help the community and earn Safiri Points" />
+                <View style={[s.contribCard, { backgroundColor: C.card, borderColor: C.border }]}>
+                  <ContribRow
+                    C={C}
+                    iconBg={C.softPurple}
+                    icon="camera-outline"
+                    iconColor="#8B5CF6"
+                    title="Add a Photo"
+                    subtitle="Help others find this stop"
+                    points="+5 pts on approval"
+                    onPress={goToAddPhoto}
+                  />
+                  <View style={[s.contribSep, { backgroundColor: C.border }]} />
+                  <ContribRow
+                    C={C}
+                    iconBg={C.softRed}
+                    icon="time-outline"
+                    iconColor={RED}
+                    title="Report a Delay"
+                    subtitle="Warn commuters about delays here"
+                    points="+3 pts now"
+                    onPress={() => setActiveSheet("delay")}
+                  />
+                  <View style={[s.contribSep, { backgroundColor: C.border }]} />
+                  <ContribRow
+                    C={C}
+                    iconBg={C.softOrange}
+                    icon="star-outline"
+                    iconColor={AMBER}
+                    title={hasReview ? "Edit Your Review" : "Write a Review"}
+                    subtitle="Rate safety, comfort, cleanliness"
+                    points={hasReview ? "Update anytime" : "+10 pts now"}
+                    onPress={() => setActiveSheet("review")}
+                  />
+                  <View style={[s.contribSep, { backgroundColor: C.border }]} />
+                  <ContribRow
+                    C={C}
+                    iconBg={C.softBlue}
+                    icon="create-outline"
+                    iconColor="#3B82F6"
+                    title="Correct Stop Info"
+                    subtitle="Wrong name, location or routes"
+                    points="+15 pts on approval"
+                    onPress={() => setActiveSheet("edit")}
+                  />
+                </View>
+              </>
             )}
 
-            {/* Photos */}
-            <SectionTitle title="Photos" sub="Be the first to document this stop" />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <PhotoPlaceholderTile dark={dark} onPress={goToAddPhoto} />
-              <PhotoPlaceholderTile dark={dark} onPress={goToAddPhoto} />
-            </ScrollView>
+            {/* ── REVIEWS TAB ── */}
+            {activeTab === "reviews" && (
+              <View style={{ paddingTop: 4 }}>
+                {reviewsLoading ? (
+                  <ActivityIndicator color={ORANGE} style={{ padding: 32 }} />
+                ) : reviews.length === 0 ? (
+                  <View style={s.emptyReviews}>
+                    <Ionicons name="chatbubble-outline" size={40} color={C.sub} />
+                    <Text style={[s.emptyNote, { textAlign: "center", marginTop: 10, fontWeight: "600" }]}>
+                      No reviews yet
+                    </Text>
+                    <Text style={[s.emptyNote, { color: C.sub, marginTop: 4, textAlign: "center" }]}>
+                      Be the first to share your experience.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <AggregateRating reviews={reviews} C={C} />
+                    {myReview && (
+                      <ReviewCard
+                        review={myReview}
+                        isOwn
+                        onEdit={() => setActiveSheet("review")}
+                        C={C}
+                      />
+                    )}
+                    {reviews
+                      .filter((r) => r.user_id !== user?.id)
+                      .map((r) => <ReviewCard key={r.id} review={r} C={C} />)}
+                  </>
+                )}
 
-            {/* Community contributions */}
-            <SectionTitle title="Contribute" sub="Help the community and earn Safiri Points" />
-            <View style={[s.contribCard, { backgroundColor: C.card, borderColor: C.border }]}>
-              <ContribRow
-                C={C}
-                iconBg={C.softPurple}
-                icon="camera-outline"
-                iconColor="#8B5CF6"
-                title="Add a Photo"
-                subtitle="Help others find this stop"
-                points="+5 pts on approval"
-                onPress={goToAddPhoto}
-              />
-              <View style={[s.contribSep, { backgroundColor: C.border }]} />
-              <ContribRow
-                C={C}
-                iconBg={C.softRed}
-                icon="time-outline"
-                iconColor={RED}
-                title="Report a Delay"
-                subtitle="Warn commuters about delays here"
-                points="+3 pts now"
-                onPress={() => setActiveSheet("delay")}
-              />
-              <View style={[s.contribSep, { backgroundColor: C.border }]} />
-              <ContribRow
-                C={C}
-                iconBg={C.softOrange}
-                icon="star-outline"
-                iconColor="#F59E0B"
-                title="Write a Review"
-                subtitle="Rate safety, comfort, cleanliness"
-                points="+10 pts now"
-                onPress={() => setActiveSheet("review")}
-              />
-              <View style={[s.contribSep, { backgroundColor: C.border }]} />
-              <ContribRow
-                C={C}
-                iconBg={C.softBlue}
-                icon="create-outline"
-                iconColor="#3B82F6"
-                title="Correct Stop Info"
-                subtitle="Wrong name, location or routes"
-                points="+15 pts on approval"
-                onPress={() => setActiveSheet("edit")}
-              />
-            </View>
+                <Pressable
+                  style={[s.writeReviewBtn, { backgroundColor: C.card, borderColor: C.border }]}
+                  onPress={() => setActiveSheet("review")}
+                >
+                  <Ionicons name="star-outline" size={16} color={AMBER} />
+                  <Text style={[s.writeReviewText, { color: C.text }]}>
+                    {hasReview ? "Edit Your Review" : "Write a Review"}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={14} color={C.sub} />
+                </Pressable>
+              </View>
+            )}
           </ScrollView>
 
           {!expanded && (
@@ -1137,11 +1363,11 @@ export default function StopDetailsSheet({
 
       <MiniSheet
         visible={activeSheet === "review"}
-        onClose={() => setActiveSheet(null)}
-        title={`Review ${stop.name}`}
+        onClose={handleReviewClose}
+        title={myReview ? `Edit Review: ${stop.name}` : `Review ${stop.name}`}
         C={C}
       >
-        <ReviewSheet stop={stop} onClose={() => setActiveSheet(null)} C={C} />
+        <ReviewSheet stop={stop} onClose={handleReviewClose} C={C} existingReview={myReview} />
       </MiniSheet>
 
       <MiniSheet
@@ -1219,7 +1445,11 @@ const s = StyleSheet.create({
   },
 
   chipsRow: { paddingHorizontal: 14, paddingBottom: 14, gap: 8 },
-  divider:  { height: StyleSheet.hairlineWidth },
+
+  tabBar:      { flexDirection: "row", borderBottomWidth: StyleSheet.hairlineWidth },
+  tabItem:     { flex: 1, alignItems: "center", paddingVertical: 10, position: "relative" },
+  tabLabel:    { fontSize: 14, fontWeight: "600" },
+  tabUnderline:{ position: "absolute", bottom: 0, left: 20, right: 20, height: 2, backgroundColor: ORANGE, borderRadius: 1 },
 
   scrollContent: { paddingHorizontal: 18, paddingTop: 4, paddingBottom: 60 },
 
@@ -1236,6 +1466,14 @@ const s = StyleSheet.create({
   routeText: { fontSize: 12, fontWeight: "700" },
   emptyNote: { fontSize: 13, color: GREY, fontStyle: "italic" },
 
+  photoTile: { width: 110, height: 82, borderRadius: 12, marginRight: 10 },
+  photoPlaceholder: {
+    width: 110, height: 82, borderRadius: 12, marginRight: 10,
+    borderWidth: 1.5, borderStyle: "dashed",
+    alignItems: "center", justifyContent: "center", gap: 4,
+  },
+  photoPlaceholderText: { fontSize: 11, color: ORANGE, fontWeight: "600" },
+
   contribCard: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1245,4 +1483,8 @@ const s = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginHorizontal: 14,
   },
+
+  emptyReviews:    { alignItems: "center", paddingVertical: 36 },
+  writeReviewBtn:  { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, marginTop: 12 },
+  writeReviewText: { flex: 1, fontWeight: "600", fontSize: 14 },
 });

@@ -118,4 +118,14 @@ export async function fetchApi<T>(
   }
 }
 
+// In-flight deduplication: prevents duplicate parallel GET requests for the same key
+const _inflight = new Map<string, Promise<any>>();
+
+export function dedupedGet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  if (_inflight.has(key)) return _inflight.get(key)!;
+  const p = fetcher().finally(() => _inflight.delete(key));
+  _inflight.set(key, p);
+  return p;
+}
+
 export default api;

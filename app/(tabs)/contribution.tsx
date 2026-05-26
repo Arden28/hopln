@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -1182,14 +1182,9 @@ export default function ContributionScreen() {
     ]);
   };
 
-  const levelPoints   = stats?.points ?? 0;
-  const toNext        = stats?.points_to_next_level ?? 1;
-  const THRESHOLDS    = [50, 150, 400, 900, 2000, 4500];
-  const level         = stats?.level ?? 1;
-  const prevThreshold = level >= 2 ? THRESHOLDS[level - 2] : 0;
-  const nextThreshold = THRESHOLDS[level - 1] ?? levelPoints;
-  const range         = nextThreshold - prevThreshold;
-  const filled        = range > 0 ? Math.min(1, (levelPoints - prevThreshold) / range) : 1;
+  const levelPoints = stats?.points ?? 0;
+  const toNext      = stats?.points_to_next_level ?? 1;
+  const level       = stats?.level ?? 1;
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
@@ -1210,7 +1205,7 @@ export default function ContributionScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 50 }}
       >
         {/* ── Level Card ── */}
         <View style={[s.levelCard, { backgroundColor: C.card, borderColor: C.border }]}>
@@ -1237,15 +1232,39 @@ export default function ContributionScreen() {
             </Pressable>
           </View>
 
-          <View style={[s.progressBg, { backgroundColor: C.input }]}>
-            <View style={[s.progressFill, { width: `${Math.round(filled * 100)}%` }]} />
+          {/* Level track */}
+          <View style={s.levelTrack}>
+            {[1, 2, 3, 4, 5, 6, 7].map((lvl, i) => {
+              const isCurrent = level === lvl;
+              const isPast    = lvl < level;
+              const dotSize   = isCurrent ? 20 : 12;
+              const dotColor  = isPast || isCurrent ? ORANGE : C.input;
+              return (
+                <React.Fragment key={lvl}>
+                  {i > 0 && (
+                    <View style={[s.levelLine, { backgroundColor: lvl <= level ? ORANGE : C.input }]} />
+                  )}
+                  <View
+                    style={[
+                      s.levelDot,
+                      {
+                        width: dotSize, height: dotSize, borderRadius: dotSize / 2,
+                        backgroundColor: dotColor,
+                        borderWidth: isCurrent ? 3 : 0,
+                        borderColor: ORANGE + "40",
+                      },
+                    ]}
+                  />
+                </React.Fragment>
+              );
+            })}
           </View>
           {toNext > 0 ? (
             <Text style={[s.progressHint, { color: C.sub }]}>
               {toNext} pts to {stats?.next_level_label ?? "next level"}
             </Text>
           ) : (
-            <Text style={[s.progressHint, { color: GREEN }]}>Max level reached!</Text>
+            <Text style={[s.progressHint, { color: GREEN }]}>Max level — Community Elder!</Text>
           )}
         </View>
 
@@ -1542,17 +1561,9 @@ const s = StyleSheet.create({
     borderRadius: 999,
   },
   badgesBtnText: { color: ORANGE, fontWeight: "600", fontSize: 13 },
-  progressBg: {
-    height: 6,
-    borderRadius: 3,
-    overflow: "hidden",
-    marginBottom: 6,
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: ORANGE,
-    borderRadius: 3,
-  },
+  levelTrack:  { flexDirection: "row", alignItems: "center", marginTop: 14, marginBottom: 6 },
+  levelLine:   { flex: 1, height: 2, marginHorizontal: 3 },
+  levelDot:    { alignItems: "center", justifyContent: "center" },
   progressHint: { fontSize: 12 },
 
   actionsRow: { paddingHorizontal: 16, paddingVertical: 18, gap: 18 },

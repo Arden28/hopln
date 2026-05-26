@@ -36,6 +36,7 @@ module.exports = {
         NSPhotoLibraryUsageDescription: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos.",
         NSPhotoLibraryAddUsageDescription: "Allow $(PRODUCT_NAME) to save photos to your library.",
         ITSAppUsesNonExemptEncryption: false,
+        UIBackgroundModes: ["location"],
       },
     },
 
@@ -52,6 +53,7 @@ module.exports = {
       permissions: [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "READ_EXTERNAL_STORAGE",
@@ -67,6 +69,7 @@ module.exports = {
     plugins: [
       "expo-router",
       "expo-secure-store",
+      "expo-task-manager",
       [
         "expo-image-picker",
         {
@@ -79,6 +82,7 @@ module.exports = {
         "expo-location",
         {
           locationWhenInUsePermission: "Allow $(PRODUCT_NAME) to use your location to show nearby stops and pick map locations.",
+          backgroundPermission: "Hopln uses your location in the background to keep your journey on track.",
         },
       ],
       [

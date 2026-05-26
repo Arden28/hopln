@@ -447,13 +447,21 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
 
 const s = StyleSheet.create({
   root:          { flex: 1 },
-  header:        { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
-  headerTitle:   { fontSize: 24, fontWeight: "700", letterSpacing: -0.5 },
+  // header:        { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
+  
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerTitle:   { fontSize: 22, fontWeight: "700", letterSpacing: -0.5 },
   iconBtn:       { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  scrollContent: { paddingHorizontal: 16, gap: 16, paddingBottom: 20 },
+  scrollContent: { paddingHorizontal: 13, gap: 16, paddingBottom: 180 },
 
   // Profile card
-  profileCard:           { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, padding: 14 },
+  profileCard:           { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, padding: 5 },
   profileAvatar:         { width: 48, height: 48, borderRadius: 24 },
   profileAvatarFallback: { backgroundColor: ORANGE, justifyContent: "center", alignItems: "center" },
   profileInitials:       { color: "#FFF", fontSize: 17, fontWeight: "700" },

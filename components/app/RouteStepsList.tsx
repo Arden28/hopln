@@ -1,8 +1,8 @@
 // components/app/RouteStepsList.tsx
 import { RouteStop, Step, WalkSubStep, getRouteColor, maneuverIcon, mToNice, sToMin } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 
 const ORANGE     = "#FF6F00";
 const BLACK      = "#1C1C1E";
@@ -11,7 +11,46 @@ const LIGHT_GREY = "#F2F2F7";
 const BORDER     = "#E5E5EA";
 const BG         = "#FFFFFF";
 
+function formatStepEta(d: Date): string {
+  if (!d || d.getTime() === 0) return "";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 const RAIL_W = 46;
+
+// ─── You-are-here animated position indicator ────────────────────────────────
+
+function YouAreHereDot({ size = 32 }: { size?: number }) {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 850, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0, duration: 850, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim]);
+
+  const scale   = anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.35] });
+  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.75] });
+
+  return (
+    <Animated.View
+      style={{
+        position:        "absolute",
+        width: size,     height: size,    borderRadius: size / 2,
+        left: "50%",     marginLeft:      -(size / 2),
+        top: "50%",      marginTop:       -(size / 2),
+        backgroundColor: ORANGE,
+        transform:       [{ scale }],
+        opacity,
+      }}
+    />
+  );
+}
 
 // ─── Walk connector dots ──────────────────────────────────────────────────────
 
@@ -84,7 +123,7 @@ const ss = StyleSheet.create({
 
 // ─── Walk row ─────────────────────────────────────────────────────────────────
 
-function WalkRow({ step, isActive, isPassed }: { step: Step; isActive: boolean; isPassed: boolean }) {
+function WalkRow({ step, isActive, isPassed, stepEta, navigating }: { step: Step; isActive: boolean; isPassed: boolean; stepEta?: Date; navigating: boolean }) {
   const [open, setOpen] = useState(isActive);
   const hasSubs = (step.subSteps?.length ?? 0) > 0;
   const dark = useColorScheme() === "dark";
@@ -96,12 +135,18 @@ function WalkRow({ step, isActive, isPassed }: { step: Step; isActive: boolean; 
     <View style={{ opacity: isPassed ? 0.35 : 1 }}>
       <Pressable style={wr.row} onPress={() => hasSubs && setOpen((v) => !v)} disabled={!hasSubs}>
         <View style={wr.rail}>
-          <Ionicons name="walk" size={20} color={isActive ? ORANGE : GREY} />
+          <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center" }}>
+            {isActive && <YouAreHereDot size={36} />}
+            <Ionicons name="walk" size={20} color={isActive ? ORANGE : GREY} />
+          </View>
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[wr.walkText, { color: textColor }, isActive && { color: ORANGE }]}>
             Walk {sToMin(step.duration).replace("~", "")} ({mToNice(step.distance)})
           </Text>
+          {navigating && stepEta && stepEta.getTime() !== 0
+            ? <Text style={wr.stepEtaText}>{"→  "}{formatStepEta(stepEta)}</Text>
+            : null}
         </View>
         {hasSubs && (
           <View style={[wr.chevronPill, { backgroundColor: pillBg }]}>
@@ -130,6 +175,7 @@ const wr = StyleSheet.create({
   chevronPill:  { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   subContainer: { flexDirection: "row", paddingBottom: 8 },
   subCard:      { flex: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 2, marginRight: 4 },
+  stepEtaText:  { fontSize: 13, color: GREY },
 });
 
 // ─── Stops list ───────────────────────────────────────────────────────────────
@@ -167,11 +213,13 @@ const sl = StyleSheet.create({
 // ─── Transit section ──────────────────────────────────────────────────────────
 
 function TransitSection({
-  depart, arrive, routeColor, stopName, alightName, isActive, isPassed,
+  depart, arrive, routeColor, stopName, alightName, isActive, isPassed, stopsRemaining, boardEta,
 }: {
   depart: Step; arrive: Step;
   routeColor: string; stopName: string; alightName: string;
   isActive: boolean; isPassed: boolean;
+  stopsRemaining?: number | null;
+  boardEta?: Date;
 }) {
   const [rideExpanded, setRideExpanded] = useState(false);
   const dark = useColorScheme() === "dark";
@@ -194,13 +242,19 @@ function TransitSection({
     <View style={[ts.wrapper, isPassed && { opacity: 0.35 }]}>
       <View style={ts.row}>
         <View style={ts.rail}>
-          <View style={[ts.busCircle, { backgroundColor: C.bg, borderColor: C.border }]}>
-            <Ionicons name="bus" size={18} color={C.text} />
+          <View style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
+            {isActive && <YouAreHereDot size={40} />}
+            <View style={[ts.busCircle, { backgroundColor: C.bg, borderColor: C.border }]}>
+              <Ionicons name="bus" size={18} color={C.text} />
+            </View>
           </View>
           <View style={[ts.verticalBar, { backgroundColor: routeColor, height: 20, marginTop: -2 }]} />
         </View>
         <View style={ts.headerText}>
           <Text style={[ts.stopNameMain, { color: C.text }]}>{stopName}</Text>
+          {isActive && boardEta && boardEta.getTime() !== 0 && (
+            <Text style={[ts.stopEtaLabel, { color: routeColor }]}>{formatStepEta(boardEta)}</Text>
+          )}
         </View>
       </View>
 
@@ -223,7 +277,9 @@ function TransitSection({
           >
             <View style={ts.rideLeft}>
               <Text style={[ts.rideText, { color: C.text }, isActive && { color: ORANGE }]}>
-                Ride {stopCount} stop{stopCount !== 1 ? "s" : ""}
+                {isActive && stopsRemaining != null
+                  ? `${stopsRemaining} stop${stopsRemaining !== 1 ? "s" : ""} remaining`
+                  : `Ride ${stopCount} stop${stopCount !== 1 ? "s" : ""}`}
                 {(rideDur || rideDist) ? (
                   <Text style={ts.rideMeta}>{"  ·  "}{rideDur}{rideDur && rideDist ? "  ·  " : ""}{rideDist}</Text>
                 ) : null}
@@ -262,6 +318,7 @@ const ts = StyleSheet.create({
     zIndex: 2, elevation: 2,
   },
   headerText:      { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 0 },
+  stopEtaLabel:    { fontSize: 13, fontWeight: "600", flexShrink: 0 },
   stopNameMain:    { fontSize: 16, fontWeight: "500" },
   middleContent:   { flex: 1, paddingVertical: 12 },
   routeInfoRow:    { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 4 },
@@ -304,12 +361,12 @@ const dn = StyleSheet.create({
 
 interface RouteStepsListProps {
   steps: Step[];
-  stepsOpen: boolean;
-  setStepsOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  nextPreview: string | null;
   nextStepIdx: number;
   navigating: boolean;
   selectedName: string;
+  stopsRemaining?: number | null;
+  scrollRef?: React.RefObject<ScrollView | null>;
+  stepETAs?: Date[];
 }
 
 export default function RouteStepsList({
@@ -317,7 +374,20 @@ export default function RouteStepsList({
   nextStepIdx,
   navigating,
   selectedName,
+  stopsRemaining,
+  scrollRef,
+  stepETAs,
 }: RouteStepsListProps) {
+  const groupOffsets = useRef<Map<number, number>>(new Map());
+
+  useEffect(() => {
+    if (!navigating || !scrollRef?.current) return;
+    const y = groupOffsets.current.get(nextStepIdx);
+    if (y != null) {
+      scrollRef.current.scrollTo({ y: Math.max(0, y - 20), animated: true });
+    }
+  }, [nextStepIdx, navigating, scrollRef]);
+
   if (steps.length === 0) return null;
 
   type WalkGroup    = { kind: "walk";    step: Step;                 flatIdx: number };
@@ -341,41 +411,52 @@ export default function RouteStepsList({
     <View style={{ paddingTop: 8, paddingBottom: 8 }}>
       <OriginNode />
 
-      {groups.map((g, gi) => {
-        if (g.kind === "walk") {
-          const isActive = navigating && nextStepIdx === g.flatIdx;
-          const isPassed = navigating && nextStepIdx > g.flatIdx;
+      {(() => {
+        let engineStepIdx = 0;
+        return groups.map((g, gi) => {
+          const myEngineIdx = engineStepIdx++;
+          if (g.kind === "walk") {
+            const isActive = navigating && nextStepIdx === g.flatIdx;
+            const isPassed = navigating && nextStepIdx > g.flatIdx;
+            const stepEta  = stepETAs?.[myEngineIdx];
+            return (
+              <React.Fragment key={gi}>
+                <WalkDots />
+                <View onLayout={(e) => groupOffsets.current.set(g.flatIdx, e.nativeEvent.layout.y)}>
+                  <WalkRow step={g.step} isActive={isActive} isPassed={isPassed} stepEta={stepEta} navigating={navigating} />
+                </View>
+                <WalkDots />
+              </React.Fragment>
+            );
+          }
+
+          const { depart, arrive } = g;
+          const routeNameMatch = depart.instruction?.match(/^Board Line (.+) at /);
+          const routeName  = routeNameMatch?.[1] ?? (depart as any).routeName ?? "";
+          const routeColor = (depart as any).routeColor ?? getRouteColor(routeName);
+          const stopName   = depart.instruction?.replace(/^Board Line .+ at /, "") ?? "";
+          const alightName = arrive.instruction?.replace(/^Alight at /, "") ?? "";
+          const isActive   = navigating && (nextStepIdx === g.flatIdx || nextStepIdx === g.flatIdx + 1);
+          const isPassed   = navigating && nextStepIdx > g.flatIdx + 1;
+          const boardEta   = stepETAs?.[myEngineIdx];
+
           return (
-            <React.Fragment key={gi}>
-              <WalkDots />
-              <WalkRow step={g.step} isActive={isActive} isPassed={isPassed} />
-              <WalkDots />
-            </React.Fragment>
+            <View key={gi} onLayout={(e) => groupOffsets.current.set(g.flatIdx, e.nativeEvent.layout.y)}>
+              <TransitSection
+                depart={depart}
+                arrive={arrive}
+                routeColor={routeColor}
+                stopName={stopName}
+                alightName={alightName}
+                isActive={isActive}
+                isPassed={isPassed}
+                stopsRemaining={stopsRemaining}
+                boardEta={boardEta}
+              />
+            </View>
           );
-        }
-
-        const { depart, arrive } = g;
-        const routeNameMatch = depart.instruction?.match(/^Board Line (.+) at /);
-        const routeName  = routeNameMatch?.[1] ?? (depart as any).routeName ?? "";
-        const routeColor = (depart as any).routeColor ?? getRouteColor(routeName);
-        const stopName   = depart.instruction?.replace(/^Board Line .+ at /, "") ?? "";
-        const alightName = arrive.instruction?.replace(/^Alight at /, "") ?? "";
-        const isActive   = navigating && (nextStepIdx === g.flatIdx || nextStepIdx === g.flatIdx + 1);
-        const isPassed   = navigating && nextStepIdx > g.flatIdx + 1;
-
-        return (
-          <TransitSection
-            key={gi}
-            depart={depart}
-            arrive={arrive}
-            routeColor={routeColor}
-            stopName={stopName}
-            alightName={alightName}
-            isActive={isActive}
-            isPassed={isPassed}
-          />
-        );
-      })}
+        });
+      })()}
 
       {lastGroup?.kind === "transit" && <WalkDots />}
       <DestNode name={selectedName} />

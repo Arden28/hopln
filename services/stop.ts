@@ -1,6 +1,7 @@
 // services/stop.service.ts
 import type { UnifiedLocation } from "@/store/journeyStore";
-import { fetchApi } from "./apiClient";
+import { fetchApi, dedupedGet } from "./apiClient";
+import { CacheService, CACHE_KEYS, CACHE_TTL } from "./cache";
 
 // Module-level cache — stops are fetched once per app session
 let _allStopsCache: Stop[] | null = null;
@@ -40,9 +41,20 @@ export const StopService = {
    * Returns slim objects: { id, name, lat, lng }.
    */
   async getAllStops(): Promise<Stop[]> {
+    // Tier 1: in-memory (fastest — within same session)
     if (_allStopsCache) return _allStopsCache;
-    const data = await fetchApi<{ data: Stop[] }>("/stops/all");
+
+    // Tier 2: AsyncStorage (fast — survives app reload, 24h TTL)
+    const cached = await CacheService.get<Stop[]>(CACHE_KEYS.STOPS_ALL, CACHE_TTL.STOPS);
+    if (cached) {
+      _allStopsCache = cached;
+      return cached;
+    }
+
+    // Tier 3: network (deduped so parallel callers share one request)
+    const data = await dedupedGet("stops_all", () => fetchApi<{ data: Stop[] }>("/stops/all"));
     _allStopsCache = data.data;
+    CacheService.set(CACHE_KEYS.STOPS_ALL, data.data); // fire-and-forget
     return _allStopsCache;
   },
 

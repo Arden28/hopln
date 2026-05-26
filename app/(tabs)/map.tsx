@@ -22,7 +22,7 @@ import { useRouter } from "expo-router";
 import { useSavedStore } from "@/store/savedStore";
 import { usePrefsStore } from "@/store/prefsStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline } from "react-native-maps";
 
 const ORANGE = "#FF6F00";
@@ -41,6 +41,19 @@ function LocationPin() {
         shadowOffset: { width: 0, height: 2 }, elevation: 6,
       }} />
     </View>
+  );
+}
+
+// Small dot — intermediate stops along a transit leg
+function IntermediateStopDot({ color }: { color: string }) {
+  return (
+    <View style={{
+      width: 13, height: 13, borderRadius: 4.5,
+      backgroundColor: color,
+      borderWidth: 2, borderColor: "#FFFFFF",
+      shadowColor: "#000", shadowOpacity: 0.18,
+      shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 4,
+    }} />
   );
 }
 
@@ -110,19 +123,90 @@ const DEFAULT_REGION = {
   longitudeDelta: deltaFromZoom(13),
 };
 
+// Projects a lat/lng point onto the nearest segment of a polyline.
+// Keeps intermediate-stop dots exactly on the route line regardless of
+// how far the GTFS stop is from the road-snapped geometry.
+function projectOntoPolyline(point: LatLng, polyline: LatLng[]): LatLng {
+  let bestDist = Infinity;
+  let best = point;
+  const px = point.longitude, py = point.latitude;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const ax = polyline[i].longitude,  ay = polyline[i].latitude;
+    const bx = polyline[i + 1].longitude, by = polyline[i + 1].latitude;
+    const abx = bx - ax, aby = by - ay;
+    const len2 = abx * abx + aby * aby;
+    if (len2 === 0) continue;
+    const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / len2));
+    const qx = ax + t * abx, qy = ay + t * aby;
+    const d = (px - qx) ** 2 + (py - qy) ** 2;
+    if (d < bestDist) { bestDist = d; best = { latitude: qy, longitude: qx }; }
+  }
+  return best;
+}
+
+// Floating info card shown when an intermediate stop dot is tapped
+function IntermStopInfoCard({
+  stop, onClose, dark,
+}: { stop: IntermediateStop; onClose: () => void; dark: boolean }) {
+  const bg     = dark ? "#1C1C1E" : "#FFFFFF";
+  const border = dark ? "#2C2C2E" : "#E5E5EA";
+  const text   = dark ? "#FFFFFF" : "#111111";
+  const sub    = dark ? "#8E8E93" : "#6B7280";
+
+  return (
+    <View style={[istyles.card, { backgroundColor: bg, borderColor: border }]}>
+      <View style={istyles.cardInner}>
+        <View style={[istyles.chip, { backgroundColor: stop.color + "22", borderColor: stop.color + "66" }]}>
+          <View style={[istyles.chipDot, { backgroundColor: stop.color }]} />
+          <Text style={[istyles.chipText, { color: stop.color }]}>{stop.routeName}</Text>
+        </View>
+        <View style={istyles.nameRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={[istyles.label, { color: sub }]}>Stop</Text>
+            <Text style={[istyles.stopName, { color: text }]} numberOfLines={2}>{stop.name}</Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={10} style={[istyles.closeBtn, { backgroundColor: border }]}>
+            <Text style={[istyles.closeX, { color: sub }]}>✕</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const istyles = StyleSheet.create({
+  card: {
+    position: "absolute", left: 16, right: 16, bottom: 260,
+    borderRadius: 16, borderWidth: 1,
+    shadowColor: "#000", shadowOpacity: 0.14, shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 }, elevation: 10,
+  },
+  cardInner:  { padding: 16, gap: 10 },
+  chip:       { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, gap: 6 },
+  chipDot:    { width: 7, height: 7, borderRadius: 3.5 },
+  chipText:   { fontSize: 12, fontWeight: "700", letterSpacing: 0.3 },
+  nameRow:    { flexDirection: "row", alignItems: "center", gap: 12 },
+  label:      { fontSize: 11, fontWeight: "500", marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.4 },
+  stopName:   { fontSize: 16, fontWeight: "700", lineHeight: 20 },
+  closeBtn:   { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
+  closeX:     { fontSize: 13, fontWeight: "600" },
+});
+
 // ── Internal overlay types (replace GeoJSON FeatureCollections) ──────────────
 
-interface WalkLeg      { id: string; coords: LatLng[] }
-interface TransitLeg   { id: string; coords: LatLng[]; color: string }
-interface NodeMarker   { id: string; coord: LatLng; name: string; color: string }
-interface LocMarker    { id: string; coord: LatLng; name: string; isStart: boolean }
+interface WalkLeg          { id: string; coords: LatLng[] }
+interface TransitLeg       { id: string; coords: LatLng[]; color: string }
+interface NodeMarker       { id: string; coord: LatLng; name: string; color: string }
+interface LocMarker        { id: string; coord: LatLng; name: string; isStart: boolean }
+interface IntermediateStop { id: string; coord: LatLng; color: string; name: string; routeName: string }
 
 export default function MapScreen() {
   const router = useRouter();
   const dark = useColorScheme() === 'dark';
   const BG = dark ? '#0F0F0F' : '#F6F7F8';
 
-  const { location: me, navState, startNavigation, stopNavigation } = useNavigation();
+  const { location: me, navState, locationPermissionDenied, openLocationSettings, gpsLost, wrongDirection, startNavigation, stopNavigation } = useNavigation();
 
   const activeJourney = useJourneyStore((s) => s.activeJourney);
   const setJourney    = useJourneyStore((s) => s.setJourney);
@@ -179,14 +263,16 @@ export default function MapScreen() {
     if (savedJourneyId !== undefined) await removeJourney(savedJourneyId);
   };
 
-  const [followMe, setFollowMe]   = useState(true);
-  const [selected, setSelected]   = useState<Stop | null>(null);
+  const stepsScrollRef = useRef<ScrollView>(null);
+  const speedKph = Math.round((me?.speed ?? 0) * 3.6);
+
+  const [followMe,    setFollowMe]    = useState(true);
+  const [navStarted,  setNavStarted]  = useState(false);
+  const [selected,    setSelected]    = useState<Stop | null>(null);
 
   const [routeInfo, setRouteInfo]     = useState<RouteInfo | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [steps, setSteps]             = useState<Step[]>([]);
-  const [stepsOpen, setStepsOpen]     = useState(false);
-
   const [nearestOpen, setNearestOpen]   = useState(false);
   const [nearestStops, setNearestStops] = useState<UnifiedLocation[]>([]);
 
@@ -202,10 +288,12 @@ export default function MapScreen() {
   const chipJustPressedRef = useRef(false);
 
   // Route overlay state — typed arrays instead of GeoJSON FeatureCollections
-  const [walkLegs,    setWalkLegs]    = useState<WalkLeg[]>([]);
-  const [transitLegs, setTransitLegs] = useState<TransitLeg[]>([]);
-  const [nodeMarkers, setNodeMarkers] = useState<NodeMarker[]>([]);
-  const [locMarkers,  setLocMarkers]  = useState<LocMarker[]>([]);
+  const [walkLegs,         setWalkLegs]         = useState<WalkLeg[]>([]);
+  const [transitLegs,      setTransitLegs]      = useState<TransitLeg[]>([]);
+  const [nodeMarkers,      setNodeMarkers]      = useState<NodeMarker[]>([]);
+  const [locMarkers,       setLocMarkers]       = useState<LocMarker[]>([]);
+  const [intermediateStops, setIntermediateStops] = useState<IntermediateStop[]>([]);
+  const [selectedIntermStop, setSelectedIntermStop] = useState<IntermediateStop | null>(null);
 
   const [viewCenter, setViewCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [viewZoom,   setViewZoom]   = useState<number>(13);
@@ -273,6 +361,7 @@ export default function MapScreen() {
       setTransitLegs([]);
       setNodeMarkers([]);
       setLocMarkers([]);
+      setIntermediateStops([]);
       return;
     }
 
@@ -286,11 +375,12 @@ export default function MapScreen() {
         const segments = route.segments;
         if (!segments?.length) return;
 
-        const summarySteps: Step[]  = [];
-        const newWalkLegs: WalkLeg[]       = [];
-        const newTransitLegs: TransitLeg[] = [];
-        const newNodeMarkers: NodeMarker[] = [];
-        const newLocMarkers: LocMarker[]   = [];
+        const summarySteps: Step[]             = [];
+        const newWalkLegs: WalkLeg[]           = [];
+        const newTransitLegs: TransitLeg[]     = [];
+        const newNodeMarkers: NodeMarker[]     = [];
+        const newLocMarkers: LocMarker[]       = [];
+        const newIntermStops: IntermediateStop[] = [];
 
         if (fromLoc._type === "location" && fromLoc.id !== "current_location") {
           newLocMarkers.push({ id: "loc-from", coord: { latitude: fromLoc.lat, longitude: fromLoc.lng }, name: fromLoc.name, isStart: true });
@@ -340,6 +430,14 @@ export default function MapScreen() {
               { id: `node-from-${i}`, coord: { latitude: seg.from.lat, longitude: seg.from.lng }, name: fromName, color },
               { id: `node-to-${i}`,   coord: { latitude: seg.to.lat,   longitude: seg.to.lng   }, name: toName,   color },
             );
+            // Intermediate stops (index 0 = boarding, last = alighting — skip both)
+            // Project onto the polyline so dots sit exactly on the road-snapped line.
+            (seg.stops ?? []).slice(1, -1).forEach((stop: any, j: number) => {
+              if (stop.lat && stop.lng) {
+                const projected = projectOntoPolyline({ latitude: stop.lat, longitude: stop.lng }, coords);
+                newIntermStops.push({ id: `interm-${i}-${j}`, coord: projected, color, name: stop.name ?? "", routeName: seg.route_name ?? "" });
+              }
+            });
             summarySteps.push(
               { instruction: `Board Line ${seg.route_name} at ${fromName}`, distance: 0,            duration: 0,            location: [seg.from.lng, seg.from.lat], type: "depart", routeName: seg.route_name ?? undefined, routeColor: color, stops: seg.stops },
               { instruction: `Alight at ${toName}`,                         distance: seg.distance, duration: seg.duration, location: [seg.to.lng,   seg.to.lat  ], type: "arrive", routeName: seg.route_name ?? undefined, routeColor: color },
@@ -351,6 +449,7 @@ export default function MapScreen() {
         setTransitLegs(newTransitLegs);
         setNodeMarkers(newNodeMarkers);
         setLocMarkers(newLocMarkers);
+        setIntermediateStops(newIntermStops);
         setSteps(summarySteps);
         setRouteInfo({ distance: route.total_distance, duration: route.total_duration });
 
@@ -379,7 +478,9 @@ export default function MapScreen() {
     clearJourney();
     setSteps([]);
     setFollowMe(true);
+    setNavStarted(false);
     setTappedCoord(null);
+    setSelectedIntermStop(null);
   }, [stopNavigation, clearJourney]);
 
   const handleSelectStop = useCallback((s: Stop) => {
@@ -388,7 +489,6 @@ export default function MapScreen() {
     setSelected(s);
     setStopDetailsOpen(false);
     setNearestOpen(false);
-    setStepsOpen(false);
     setTappedCoord(null);
     camera.animateTo({ center: { latitude: s.lat, longitude: s.lng }, zoom: 17.2, duration: 500 });
   }, [stopNavigation, camera]);
@@ -430,13 +530,14 @@ export default function MapScreen() {
     prevJourneyRouteRef.current = activeJourney.route;
     if (activeJourney.route.is_ai_derived) {
       setFollowMe(true);
+      setNavStarted(true);
       setTimeout(() => startNavigation(), 300);
     }
   }, [activeJourney, startNavigation]);
 
   const handleToggleNav = useCallback((nextState: boolean) => {
-    if (nextState) { startNavigation(); setFollowMe(true); }
-    else           { stopNavigation();  setFollowMe(false); }
+    if (nextState) { startNavigation(); setFollowMe(true);  setNavStarted(true);  }
+    else           { stopNavigation();  setFollowMe(false); setNavStarted(false); }
   }, [startNavigation, stopNavigation]);
 
   // ── Region change → update zoom + center for StopsLayer ──────────────────────
@@ -486,6 +587,20 @@ export default function MapScreen() {
             zIndex={2}
             geodesic
           />
+        ))}
+
+        {/* Intermediate stops — small route-coloured dots between board and alight */}
+        {intermediateStops.map((s) => (
+          <Marker
+            key={s.id}
+            coordinate={s.coord}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 0.5 }}
+            zIndex={3}
+            onPress={() => setSelectedIntermStop(s)}
+          >
+            <IntermediateStopDot color={s.color} />
+          </Marker>
         ))}
 
         {/* Board/alight node markers — route-coloured circle with matatu icon */}
@@ -542,6 +657,17 @@ export default function MapScreen() {
         </View>
       )}
 
+      {locationPermissionDenied && (
+        <Pressable
+          onPress={openLocationSettings}
+          style={styles.permissionBanner}
+        >
+          <Text style={styles.permissionText}>
+            Location needed for navigation — tap to enable in Settings
+          </Text>
+        </Pressable>
+      )}
+
       <MapFloatingUI
         onRecenter={() => {
           setFollowMe(true);
@@ -553,13 +679,21 @@ export default function MapScreen() {
         }}
         onOpenKwame={() => { chipJustPressedRef.current = true; setNearestOpen(false); router.push("/kwame"); }}
         navigating={navigating}
+        followMe={followMe}
+        waitingForBus={tripStatus === "WAITING_FOR_BUS" && navStarted}
         onToggleNav={() => handleToggleNav(!navigating)}
         nextPreview={nextPreview}
         nextStep={nextStep}
         showNavSub={prefs.navHints === "detailed"}
         eta={navState?.eta ?? null}
         remainingDistanceM={navState?.remainingDistanceM ?? null}
+        distanceToNextStepM={navState?.distanceToNextStepM ?? null}
+        navStatus={navState?.status ?? null}
+        stopsRemaining={navState?.stopsRemaining ?? null}
         arrivalSoonShown={navState?.status === "arrived"}
+        gpsLost={gpsLost}
+        wrongDirection={wrongDirection && navigating}
+        currentSpeedKph={navigating ? speedKph : undefined}
         activeJourney={activeJourney}
         onClearJourney={handleClearJourney}
         bottomOffset={
@@ -591,9 +725,17 @@ export default function MapScreen() {
         />
       )}
 
+      {selectedIntermStop && (
+        <IntermStopInfoCard
+          stop={selectedIntermStop}
+          onClose={() => setSelectedIntermStop(null)}
+          dark={dark}
+        />
+      )}
+
       {activeJourney && (
-        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin} isSaved={isSaved} onSave={handleSaveJourney} onUnsave={handleUnsaveJourney}>
-          <RouteStepsList steps={steps} stepsOpen={stepsOpen} setStepsOpen={setStepsOpen} nextPreview={nextPreview} nextStepIdx={navState?.stepIndex ?? 0} navigating={navigating} selectedName={activeJourney.toLoc.name} />
+        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin} isSaved={isSaved} onSave={handleSaveJourney} onUnsave={handleUnsaveJourney} scrollRef={stepsScrollRef}>
+          <RouteStepsList steps={steps} nextStepIdx={navState?.stepIndex ?? 0} navigating={navigating} selectedName={activeJourney.toLoc.name} stopsRemaining={navState?.stopsRemaining ?? null} stepETAs={navState?.stepETAs} scrollRef={stepsScrollRef} />
         </JourneyDetailsSheet>
       )}
     </View>
@@ -603,6 +745,15 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
   locatingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  permissionBanner: {
+    position: "absolute", bottom: 100, left: 16, right: 16,
+    backgroundColor: "#FF3B30", borderRadius: 12,
+    paddingVertical: 12, paddingHorizontal: 16,
+    zIndex: 20,
+    shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 }, elevation: 10,
+  },
+  permissionText: { color: "#FFFFFF", fontSize: 14, fontWeight: "600", textAlign: "center" },
   headingArrow: {
     width: 0,
     height: 0,
