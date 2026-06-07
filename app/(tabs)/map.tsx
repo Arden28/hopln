@@ -21,8 +21,10 @@ import mapStyleDark from "@/lib/map_style_dark.json";
 import { useRouter } from "expo-router";
 import { useSavedStore } from "@/store/savedStore";
 import { usePrefsStore } from "@/store/prefsStore";
+import { useAuthStore } from "@/store/authStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline } from "react-native-maps";
 
 const ORANGE = "#FF6F00";
@@ -44,7 +46,7 @@ function LocationPin() {
   );
 }
 
-// Small dot — intermediate stops along a transit leg
+// Small dot, intermediate stops along a transit leg
 function IntermediateStopDot({ color }: { color: string }) {
   return (
     <View style={{
@@ -57,7 +59,7 @@ function IntermediateStopDot({ color }: { color: string }) {
   );
 }
 
-// Route-coloured circle with matatu icon — used for board / alight nodes
+// Route-coloured circle with matatu icon, used for board / alight nodes
 function StopNodeMarker({ color }: { color: string }) {
   return (
     <View style={{
@@ -99,7 +101,7 @@ function DestinationPin({ name }: { name: string }) {
   );
 }
 
-// Rounded square — used for origin (orange) and destination (dark)
+// Rounded square, used for origin (orange) and destination (dark)
 function SquarePin({ isStart }: { isStart: boolean }) {
   return (
     <View style={{
@@ -214,6 +216,8 @@ export default function MapScreen() {
   const clearJourney  = useJourneyStore((s) => s.clearJourney);
   const navigating    = tripStatus === "IN_TRANSIT";
 
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
   const { journeys, addJourney, removeJourney } = useSavedStore();
   const { prefs, load: loadPrefs } = usePrefsStore();
   useEffect(() => { loadPrefs(); }, [loadPrefs]);
@@ -239,6 +243,7 @@ export default function MapScreen() {
   );
 
   const handleSaveJourney = async (label?: string) => {
+    if (!isAuthenticated) { setShowSaveWall(true); return; }
     if (!activeJourney) return;
     const { fromLoc, toLoc, route } = activeJourney;
     await addJourney({
@@ -266,6 +271,8 @@ export default function MapScreen() {
   const stepsScrollRef = useRef<ScrollView>(null);
   const speedKph = Math.round((me?.speed ?? 0) * 3.6);
 
+  const [showSaveWall, setShowSaveWall] = useState(false);
+
   const [followMe,    setFollowMe]    = useState(true);
   const [navStarted,  setNavStarted]  = useState(false);
   const [selected,    setSelected]    = useState<Stop | null>(null);
@@ -276,7 +283,7 @@ export default function MapScreen() {
   const [nearestOpen, setNearestOpen]   = useState(false);
   const [nearestStops, setNearestStops] = useState<UnifiedLocation[]>([]);
 
-  // All stops for map clustering — loaded once on mount
+  // All stops for map clustering, loaded once on mount
   const [allStops, setAllStops] = useState<Stop[]>([]);
 
   // Stop card / details sheet
@@ -287,7 +294,7 @@ export default function MapScreen() {
 
   const chipJustPressedRef = useRef(false);
 
-  // Route overlay state — typed arrays instead of GeoJSON FeatureCollections
+  // Route overlay state, typed arrays instead of GeoJSON FeatureCollections
   const [walkLegs,         setWalkLegs]         = useState<WalkLeg[]>([]);
   const [transitLegs,      setTransitLegs]      = useState<TransitLeg[]>([]);
   const [nodeMarkers,      setNodeMarkers]      = useState<NodeMarker[]>([]);
@@ -302,13 +309,13 @@ export default function MapScreen() {
   const lastCamTime = useRef<number>(0);
   const camera      = useMapCamera(mapRef);
 
-  // Primitive extractions — let effects depend on scalar values, not the object
+  // Primitive extractions, let effects depend on scalar values, not the object
   // reference, so heading/speed changes don't trigger unnecessary re-runs.
   const meLat = me?.latitude  ?? null;
   const meLng = me?.longitude ?? null;
 
 
-  // ── All stops — fetched once on mount for map clustering ────────────────────
+  // ── All stops, fetched once on mount for map clustering ────────────────────
 
   useEffect(() => {
     StopService.getAllStops()
@@ -430,7 +437,7 @@ export default function MapScreen() {
               { id: `node-from-${i}`, coord: { latitude: seg.from.lat, longitude: seg.from.lng }, name: fromName, color },
               { id: `node-to-${i}`,   coord: { latitude: seg.to.lat,   longitude: seg.to.lng   }, name: toName,   color },
             );
-            // Intermediate stops (index 0 = boarding, last = alighting — skip both)
+            // Intermediate stops (index 0 = boarding, last = alighting, skip both)
             // Project onto the polyline so dots sit exactly on the road-snapped line.
             (seg.stops ?? []).slice(1, -1).forEach((stop: any, j: number) => {
               if (stop.lat && stop.lng) {
@@ -565,7 +572,7 @@ export default function MapScreen() {
         onRegionChangeComplete={onRegionChangeComplete}
         customMapStyle={dark ? mapStyleDark : mapStyle}
       >
-        {/* Walking route legs — dashed grey, below transit */}
+        {/* Walking route legs, dashed grey, below transit */}
         {walkLegs.map((leg) => (
           <Polyline
             key={leg.id}
@@ -577,7 +584,7 @@ export default function MapScreen() {
           />
         ))}
 
-        {/* Transit route legs — road-snapped, solid, route-coloured */}
+        {/* Transit route legs, road-snapped, solid, route-coloured */}
         {transitLegs.map((leg) => (
           <Polyline
             key={leg.id}
@@ -589,7 +596,7 @@ export default function MapScreen() {
           />
         ))}
 
-        {/* Intermediate stops — small route-coloured dots between board and alight */}
+        {/* Intermediate stops, small route-coloured dots between board and alight */}
         {intermediateStops.map((s) => (
           <Marker
             key={s.id}
@@ -603,7 +610,7 @@ export default function MapScreen() {
           </Marker>
         ))}
 
-        {/* Board/alight node markers — route-coloured circle with matatu icon */}
+        {/* Board/alight node markers, route-coloured circle with matatu icon */}
         {nodeMarkers.map((m) => (
           <Marker
             key={m.id}
@@ -615,7 +622,7 @@ export default function MapScreen() {
           </Marker>
         ))}
 
-        {/* Origin / destination — branded rounded square (Uber-style) */}
+        {/* Origin / destination, branded rounded square (Uber-style) */}
         {locMarkers.map((m) => (
           <Marker
             key={m.id}
@@ -663,7 +670,7 @@ export default function MapScreen() {
           style={styles.permissionBanner}
         >
           <Text style={styles.permissionText}>
-            Location needed for navigation — tap to enable in Settings
+            Location needed for navigation, tap to enable in Settings
           </Text>
         </Pressable>
       )}
@@ -738,6 +745,35 @@ export default function MapScreen() {
           <RouteStepsList steps={steps} nextStepIdx={navState?.stepIndex ?? 0} navigating={navigating} selectedName={activeJourney.toLoc.name} stopsRemaining={navState?.stopsRemaining ?? null} stepETAs={navState?.stepETAs} scrollRef={stepsScrollRef} />
         </JourneyDetailsSheet>
       )}
+
+      {showSaveWall && (
+        <View style={styles.saveWallBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowSaveWall(false)} />
+          <View style={[styles.saveWallCard, { backgroundColor: dark ? "#1C1C1E" : "#FFFFFF" }]}>
+            <View style={styles.saveWallHandle} />
+            <View style={styles.saveWallIconWrap}>
+              <Ionicons name="bookmark-outline" size={26} color={ORANGE} />
+            </View>
+            <Text style={[styles.saveWallTitle, { color: dark ? "#FFF" : "#1C1C1E" }]}>
+              Save this journey
+            </Text>
+            <Text style={[styles.saveWallSub, { color: dark ? "#8E8E93" : "#6B7280" }]}>
+              Sign in to save journeys and access them later.
+            </Text>
+            <Pressable
+              style={styles.saveWallBtn}
+              onPress={() => { setShowSaveWall(false); router.push("/(auth)/login"); }}
+            >
+              <Text style={styles.saveWallBtnText}>Sign in</Text>
+            </Pressable>
+            <Pressable style={styles.saveWallDismiss} onPress={() => setShowSaveWall(false)}>
+              <Text style={[styles.saveWallDismissText, { color: dark ? "#8E8E93" : "#6B7280" }]}>
+                Not now
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -764,4 +800,66 @@ const styles = StyleSheet.create({
     borderRightColor: "transparent",
     borderBottomColor: "#007AFF",
   },
+
+  saveWallBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+    zIndex: 50,
+  },
+  saveWallCard: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 36,
+    alignItems: "center",
+    gap: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 20,
+  },
+  saveWallHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#C7C7CC",
+    alignSelf: "center",
+    marginBottom: 8,
+  },
+  saveWallIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(255,111,0,0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginVertical: 4,
+  },
+  saveWallTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    letterSpacing: -0.3,
+  },
+  saveWallSub: {
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
+    maxWidth: 260,
+    marginBottom: 4,
+  },
+  saveWallBtn: {
+    width: "100%",
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: "#FF6F00",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  saveWallBtnText: { color: "#FFF", fontWeight: "700", fontSize: 16 },
+  saveWallDismiss: { paddingVertical: 10 },
+  saveWallDismissText: { fontSize: 14, fontWeight: "500" },
 });

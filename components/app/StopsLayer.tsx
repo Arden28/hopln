@@ -84,7 +84,7 @@ export default function StopsLayer({
     const minLng = viewCenter.lng - dLon;
     const maxLng = viewCenter.lng + dLon;
 
-    // Exclude the selected stop — it always gets its own marker below
+    // Exclude the selected stop, it always gets its own marker below
     const selId = selected?.id ?? null;
 
     const inBounds = allStops.filter(
@@ -103,7 +103,7 @@ export default function StopsLayer({
     const cs = cellDeg(viewZoom);
 
     if (cs === 0) {
-      // No clustering — render individual markers (capped to avoid overload)
+      // No clustering, render individual markers (capped to avoid overload)
       const capped = nearby.slice(0, 500);
       return {
         clusters: capped.map<Cluster>((s) => ({
@@ -175,7 +175,7 @@ export default function StopsLayer({
         ),
       )}
 
-      {/* Selected stop — always on top, larger icon */}
+      {/* Selected stop, always on top, larger icon */}
       {selectedStop && (
         <Marker
           key={`${selectedStop.id}-selected`}

@@ -7,8 +7,12 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import NetInfo from "@react-native-community/netinfo";
 import { useNetworkStore } from "@/store/networkStore";
 import { registerLocationTask } from "@/tasks/locationTask";
+import { requestNotificationPermission, registerPushToken, syncTokenWithBackend, setupNotificationTapHandler } from "@/services/notifications";
+import { useNotificationStore } from "@/store/notificationStore";
+import { useAuthStore } from "@/store/authStore";
+import api from "@/services/apiClient";
 
-// Register background location task at module-eval time — before any component mounts.
+// Register background location task at module-eval time, before any component mounts.
 registerLocationTask();
 
 const qc = new QueryClient({
@@ -25,14 +29,43 @@ const qc = new QueryClient({
 
 export default function RootLayout() {
   const [loaded] = useFonts({ Inter_400Regular, Inter_600SemiBold, Inter_700Bold });
-  const setOnline = useNetworkStore((s) => s.setOnline);
+  const setOnline         = useNetworkStore((s) => s.setOnline);
+  const setPushToken      = useNotificationStore((s) => s.setPushToken);
+  const setPermGranted    = useNotificationStore((s) => s.setPermissionGranted);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
       setOnline(state.isConnected ?? true);
     });
+    // Warm up OTP JVM silently so the first journey plan is fast
+    api.get('/otp/warmup').catch(() => {});
     return unsub;
   }, [setOnline]);
+
+  useEffect(() => {
+    let tapHandlerCleanup: (() => void) | undefined;
+
+    (async () => {
+      const granted = await requestNotificationPermission();
+      setPermGranted(granted);
+      if (!granted) return;
+
+      const token = await registerPushToken();
+      if (token) {
+        setPushToken(token);
+        // Only sync with backend if the user is already authenticated.
+        // If not yet authenticated, setAuth() (after login) and initialize()
+        // (for returning users) will both pick up the token from the store.
+        if (useAuthStore.getState().isAuthenticated) {
+          syncTokenWithBackend(token).catch(() => {});
+        }
+      }
+
+      tapHandlerCleanup = setupNotificationTapHandler();
+    })();
+
+    return () => tapHandlerCleanup?.();
+  }, [setPermGranted, setPushToken]);
 
   if (!loaded) return <View style={{ flex: 1, backgroundColor: "#0A0A0A" }} />;
 
@@ -43,6 +76,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="journey" options={{ headerShown: false }} />
         <Stack.Screen name="(account)" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="kwame" options={{ animation: "slide_from_bottom", gestureEnabled: true }} />
         </Stack>

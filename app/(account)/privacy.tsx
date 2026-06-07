@@ -207,7 +207,7 @@ export default function Privacy() {
           style: "destructive",
           onPress: async () => {
             try {
-              // DELETE /auth/account — endpoint to be implemented on backend
+              // DELETE /auth/account, endpoint to be implemented on backend
             } catch {}
             await logout();
             router.replace("/(auth)/get-started" as any);

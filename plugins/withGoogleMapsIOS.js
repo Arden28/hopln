@@ -26,7 +26,7 @@ function withGoogleMapsPodfile(config) {
 
       let podfile = fs.readFileSync(podfilePath, "utf8");
 
-      // Already patched — skip.
+      // Already patched, skip.
       if (podfile.includes("GoogleMaps")) return config;
 
       // Replace the bare react-native-maps pod line with the GoogleMaps subspec.
@@ -60,7 +60,7 @@ function withGoogleMapsAppDelegate(config, { apiKey }) {
   return withAppDelegate(config, (config) => {
     let { contents } = config.modResults;
 
-    // Already patched — skip.
+    // Already patched, skip.
     if (contents.includes("GMSServices provideAPIKey")) return config;
 
     // Add import after the first #import line.

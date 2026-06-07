@@ -4,10 +4,17 @@ import { ActivityIndicator, View } from "react-native";
 import { useAuthStore } from "@/store/authStore";
 
 export default function Index() {
-  const { isLoading, isAuthenticated, initialize } = useAuthStore();
+  const { isLoading, isAuthenticated, hasSeenOnboarding, initialize } = useAuthStore();
 
   useEffect(() => {
-    initialize();
+    // Wait for Zustand to finish rehydrating from AsyncStorage so that
+    // cachedUser is available inside initialize() before we hit /auth/me.
+    if (useAuthStore.persist.hasHydrated()) {
+      initialize();
+    } else {
+      const unsub = useAuthStore.persist.onFinishHydration(() => initialize());
+      return unsub;
+    }
   }, []);
 
   if (isLoading) {
@@ -18,5 +25,7 @@ export default function Index() {
     );
   }
 
-  return <Redirect href={isAuthenticated ? "/(tabs)/map" : "/(auth)/get-started"} />;
+  if (isAuthenticated)    return <Redirect href="/(tabs)/map" />;
+  if (!hasSeenOnboarding) return <Redirect href="/(auth)/get-started" />;
+  return                         <Redirect href="/(tabs)/map" />;
 }

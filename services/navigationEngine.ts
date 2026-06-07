@@ -13,7 +13,7 @@
 export interface NavStep {
   instruction: string;
   distance:    number;   // metres
-  duration:    number;   // scheduled seconds — used for hybrid transit ETA
+  duration:    number;   // scheduled seconds, used for hybrid transit ETA
   location:    [number, number]; // [lng, lat] – GeoJSON convention
   type?:       string;
   subSteps?:   any;
@@ -296,7 +296,7 @@ export class NavigationEngine {
           totalS += Math.max(0, stepEnd - confirmedOffset) / speed;
         }
       } else {
-        // Future steps — use full scheduled duration for transit, else walk speed
+        // Future steps, use full scheduled duration for transit, else walk speed
         if (isTransit(step.type) && step.duration > 0) {
           totalS += step.duration;
         } else {

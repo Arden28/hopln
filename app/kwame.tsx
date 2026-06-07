@@ -1,4 +1,4 @@
-// app/kwame.tsx — full-screen AI assistant screen
+// app/kwame.tsx, full-screen AI assistant screen
 import { ChatMessage, KwameStatus, useKwame } from "@/hooks/useKwame";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
 import { Coords, getRouteColor, mToNice, sToMin } from "@/utils/mapHelpers";

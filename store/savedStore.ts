@@ -36,9 +36,9 @@ export const useSavedStore = create<SavedStore>()(
         const { loaded, lastFetchedAt } = get();
         const isStale = !lastFetchedAt || Date.now() - lastFetchedAt > STALE_MS;
 
-        if (loaded && !isStale) return;          // fresh — nothing to do
+        if (loaded && !isStale) return;          // fresh, nothing to do
         if (loaded && isStale) {
-          get().refresh();                       // stale — background refresh, don't await
+          get().refresh();                       // stale, background refresh, don't await
           return;
         }
 

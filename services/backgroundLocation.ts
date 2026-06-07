@@ -34,6 +34,6 @@ export async function stopBackgroundTracking(): Promise<void> {
     const running = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
     if (running) await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
   } catch {
-    // Task may not be registered yet on cold start — safe to ignore
+    // Task may not be registered yet on cold start, safe to ignore
   }
 }

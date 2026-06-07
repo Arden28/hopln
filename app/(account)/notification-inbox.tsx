@@ -1,31 +1,73 @@
 // app/(account)/notification-inbox.tsx
 import { ScreenHeader } from "@/components/app/ScreenHeader";
+import ApiClient from "@/services/apiClient";
+import { CacheService, CACHE_KEYS, CACHE_TTL } from "@/services/cache";
+import { useNotificationStore } from "@/store/notificationStore";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
 const GREY   = "#8E8E93";
 
-// ── Type definitions (ready for real data) ───────────────────────────────────
+// ── API types ─────────────────────────────────────────────────────────────────
+
+interface ApiNotification {
+  id:         number;
+  type:       string;
+  title:      string;
+  body:       string;
+  data:       Record<string, unknown> | null;
+  read_at:    string | null;
+  created_at: string;
+}
+
+interface PaginatedResponse {
+  data:         ApiNotification[];
+  current_page: number;
+  last_page:    number;
+}
+
+// ── Category derivation from notification type ────────────────────────────────
 
 type NotifCategory = "transit" | "community" | "system" | "journey";
 
-interface Notification {
-  id:       string;
-  category: NotifCategory;
-  title:    string;
-  body:     string;
-  time:     string;  // ISO
-  read:     boolean;
+const TYPE_TO_CATEGORY: Record<string, NotifCategory> = {
+  route_changes:    "transit",
+  disruptions:      "transit",
+  stop_updates:     "transit",
+  bus_arriving:     "transit",
+  journey_reminder: "journey",
+  turn_by_turn:     "journey",
+  alight_warning:   "journey",
+  arrival:          "journey",
+  wrong_direction:  "journey",
+  nearby_contrib:   "community",
+  points_earned:    "community",
+  tips:             "system",
+  app_news:         "system",
+};
+
+function categoryFor(type: string): NotifCategory {
+  return TYPE_TO_CATEGORY[type] ?? "system";
 }
 
 const CATEGORY_META: Record<NotifCategory, { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string; darkBg: string }> = {
-  transit:   { icon: "bus",              color: ORANGE,    bg: "#FFF3E0", darkBg: "rgba(255,111,0,0.18)"  },
-  community: { icon: "people",           color: "#10B981", bg: "#F0FFF4", darkBg: "rgba(16,185,129,0.15)" },
-  system:    { icon: "information",      color: "#3B82F6", bg: "#EFF6FF", darkBg: "rgba(59,130,246,0.15)" },
-  journey:   { icon: "navigate-circle",  color: "#8B5CF6", bg: "#F5F3FF", darkBg: "rgba(139,92,246,0.15)" },
+  transit:   { icon: "bus",             color: ORANGE,    bg: "#FFF3E0", darkBg: "rgba(255,111,0,0.18)"  },
+  community: { icon: "people",          color: "#10B981", bg: "#F0FFF4", darkBg: "rgba(16,185,129,0.15)" },
+  system:    { icon: "information",     color: "#3B82F6", bg: "#EFF6FF", darkBg: "rgba(59,130,246,0.15)" },
+  journey:   { icon: "navigate-circle", color: "#8B5CF6", bg: "#F5F3FF", darkBg: "rgba(139,92,246,0.15)" },
 };
 
 // ── Color factory ─────────────────────────────────────────────────────────────
@@ -38,8 +80,24 @@ function makeC(dark: boolean) {
     sub:      dark ? GREY      : "#6B7280",
     hairline: dark ? "#2C2C2E" : "#E5E7EB",
     unread:   dark ? "#2C2C2E" : "#FFF8F4",
-    badge:    dark ? "#FF6F00" : "#FF6F00",
   };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)    return "Just now";
+  if (m < 60)   return `${m}m ago`;
+  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
+  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function isToday(iso: string): boolean {
+  const d = new Date(iso);
+  const n = new Date();
+  return d.getDate() === n.getDate() && d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
 }
 
 // ── Notification row ──────────────────────────────────────────────────────────
@@ -48,50 +106,42 @@ function NotifRow({
   notif,
   C,
   dark,
+  onPress,
 }: {
-  notif: Notification;
+  notif: ApiNotification;
   C: ReturnType<typeof makeC>;
   dark: boolean;
+  onPress: (id: number) => void;
 }) {
-  const meta = CATEGORY_META[notif.category];
+  const cat  = categoryFor(notif.type);
+  const meta = CATEGORY_META[cat];
   const bg   = dark ? meta.darkBg : meta.bg;
-  const time = formatTime(notif.time);
+  const read = notif.read_at !== null;
 
   return (
     <Pressable
+      onPress={() => { if (!read) onPress(notif.id); }}
       style={({ pressed }) => [
         s.notifRow,
-        { backgroundColor: notif.read ? C.card : C.unread },
-        pressed && { opacity: 0.75 },
+        { backgroundColor: read ? C.card : C.unread },
+        pressed && { opacity: 0.72 },
       ]}
     >
-      {/* Icon */}
       <View style={[s.notifIcon, { backgroundColor: bg }]}>
         <Ionicons name={meta.icon} size={20} color={meta.color} />
       </View>
 
-      {/* Body */}
       <View style={s.notifBody}>
         <View style={s.notifTop}>
           <Text style={[s.notifTitle, { color: C.text }]} numberOfLines={1}>{notif.title}</Text>
-          <Text style={[s.notifTime, { color: C.sub }]}>{time}</Text>
+          <Text style={[s.notifTime, { color: C.sub }]}>{formatTime(notif.created_at)}</Text>
         </View>
         <Text style={[s.notifText, { color: C.sub }]} numberOfLines={2}>{notif.body}</Text>
       </View>
 
-      {/* Unread dot */}
-      {!notif.read && <View style={[s.unreadDot, { backgroundColor: ORANGE }]} />}
+      {!read && <View style={[s.unreadDot, { backgroundColor: ORANGE }]} />}
     </Pressable>
   );
-}
-
-function formatTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1)   return "Just now";
-  if (m < 60)  return `${m}m ago`;
-  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
-  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function SectionLabel({ label, C }: { label: string; C: ReturnType<typeof makeC> }) {
@@ -105,9 +155,9 @@ function SectionLabel({ label, C }: { label: string; C: ReturnType<typeof makeC>
 // ── Empty state ───────────────────────────────────────────────────────────────
 
 function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
+  const router = useRouter();
   return (
     <View style={s.empty}>
-      {/* Bell with sparkle */}
       <View style={s.emptyIconWrap}>
         <View style={[s.emptyIconOuter, { backgroundColor: ORANGE + "18" }]}>
           <View style={[s.emptyIconInner, { backgroundColor: ORANGE + "30" }]}>
@@ -120,10 +170,9 @@ function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
 
       <Text style={[s.emptyTitle, { color: C.text }]}>You're all caught up</Text>
       <Text style={[s.emptySub, { color: C.sub }]}>
-        When you get transit alerts, journey reminders, or community updates, they'll appear here.
+        Transit alerts, journey reminders, and community updates will appear here.
       </Text>
 
-      {/* Category preview chips */}
       <View style={s.categoryRow}>
         {(Object.entries(CATEGORY_META) as [NotifCategory, typeof CATEGORY_META[NotifCategory]][]).map(([key, meta]) => (
           <View key={key} style={[s.categoryChip, { backgroundColor: meta.bg }]}>
@@ -134,6 +183,20 @@ function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
           </View>
         ))}
       </View>
+
+      <Pressable
+        style={({ pressed }) => [s.settingsLink, { backgroundColor: C.card, opacity: pressed ? 0.7 : 1 }]}
+        onPress={() => router.push("/(account)/notifications" as any)}
+      >
+        <View style={[s.settingsIcon, { backgroundColor: ORANGE + "18" }]}>
+          <Ionicons name="settings-outline" size={18} color={ORANGE} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.settingsTitle, { color: C.text }]}>Notification settings</Text>
+          <Text style={[s.settingsSub, { color: C.sub }]}>Control what you receive and how</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={C.sub} />
+      </Pressable>
     </View>
   );
 }
@@ -141,50 +204,125 @@ function EmptyState({ C }: { C: ReturnType<typeof makeC> }) {
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function NotificationInbox() {
-  const insets = useSafeAreaInsets();
-  const dark   = useColorScheme() === "dark";
-  const C      = makeC(dark);
-  const router = useRouter();
+  const insets  = useSafeAreaInsets();
+  const dark    = useColorScheme() === "dark";
+  const C       = makeC(dark);
+  const router  = useRouter();
 
-  // No real notifications yet — frontend only
-  const notifications: Notification[] = [];
+  const setUnreadCount = useNotificationStore((s) => s.setUnreadCount);
 
-  const today   = notifications.filter((n) => isToday(n.time));
-  const earlier = notifications.filter((n) => !isToday(n.time));
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [markingAll, setMarkingAll]       = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const syncUnread = useCallback((list: ApiNotification[]) => {
+    const count = list.filter((n) => n.read_at === null).length;
+    setUnreadCount(count);
+  }, [setUnreadCount]);
+
+  const loadNotifications = useCallback(async () => {
+    // Show cached data immediately
+    const cached = await CacheService.get<ApiNotification[]>(CACHE_KEYS.NOTIFICATIONS_INBOX, CACHE_TTL.NOTIFICATIONS_INBOX);
+    if (cached && mountedRef.current) {
+      setNotifications(cached);
+      syncUnread(cached);
+      setLoading(false);
+    }
+
+    // Fetch fresh from server
+    try {
+      const res = await ApiClient.get<PaginatedResponse>("/auth/notifications");
+      const fresh = res.data.data;
+      if (mountedRef.current) {
+        setNotifications(fresh);
+        syncUnread(fresh);
+        setLoading(false);
+      }
+      await CacheService.set(CACHE_KEYS.NOTIFICATIONS_INBOX, fresh);
+    } catch {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [syncUnread]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  const handleMarkRead = useCallback(async (id: number) => {
+    const updated = notifications.map((n) =>
+      n.id === id ? { ...n, read_at: new Date().toISOString() } : n,
+    );
+    setNotifications(updated);
+    syncUnread(updated);
+    CacheService.set(CACHE_KEYS.NOTIFICATIONS_INBOX, updated);
+
+    ApiClient.patch(`/auth/notifications/${id}/read`).catch(() => {});
+  }, [notifications, syncUnread]);
+
+  const handleMarkAllRead = useCallback(async () => {
+    if (markingAll) return;
+    setMarkingAll(true);
+    const now = new Date().toISOString();
+    const updated = notifications.map((n) => ({ ...n, read_at: n.read_at ?? now }));
+    setNotifications(updated);
+    syncUnread(updated);
+    CacheService.set(CACHE_KEYS.NOTIFICATIONS_INBOX, updated);
+
+    try {
+      await ApiClient.post("/auth/notifications/mark-all-read");
+    } catch {
+      Alert.alert("Error", "Could not mark all as read. Please try again.");
+      setNotifications(notifications);
+      syncUnread(notifications);
+    } finally {
+      if (mountedRef.current) setMarkingAll(false);
+    }
+  }, [markingAll, notifications, syncUnread]);
+
+  const unreadCount = notifications.filter((n) => n.read_at === null).length;
+  const today       = notifications.filter((n) => isToday(n.created_at));
+  const earlier     = notifications.filter((n) => !isToday(n.created_at));
 
   const headerC = { bg: C.card, text: C.text, hairline: C.hairline };
+
+  const headerRight = unreadCount > 0 ? (
+    <Pressable
+      onPress={handleMarkAllRead}
+      disabled={markingAll}
+      style={({ pressed }) => ({ opacity: pressed || markingAll ? 0.5 : 1 })}
+    >
+      <Text style={s.markAllText}>
+        {markingAll ? "Marking…" : "Mark all read"}
+      </Text>
+    </Pressable>
+  ) : undefined;
 
   return (
     <View style={[s.root, { backgroundColor: C.bg }]}>
       <ScreenHeader
         title="Notifications"
         C={headerC}
-        rightLabel="Settings"
-        rightAction={() => router.push("/(account)/notifications" as any)}
+        rightLabel={unreadCount > 0 ? undefined : "Settings"}
+        rightAction={unreadCount > 0 ? undefined : () => router.push("/(account)/notifications" as any)}
+        rightNode={headerRight}
       />
 
-      {notifications.length === 0 ? (
+      {loading && notifications.length === 0 ? (
+        <View style={s.loaderWrap}>
+          <ActivityIndicator color={ORANGE} />
+        </View>
+      ) : notifications.length === 0 ? (
         <ScrollView
           contentContainerStyle={[s.emptyScroll, { paddingBottom: insets.bottom + 32 }]}
           showsVerticalScrollIndicator={false}
         >
           <EmptyState C={C} />
-
-          {/* Settings link */}
-          <Pressable
-            style={({ pressed }) => [s.settingsLink, { backgroundColor: C.card, opacity: pressed ? 0.7 : 1 }]}
-            onPress={() => router.push("/(account)/notifications" as any)}
-          >
-            <View style={[s.settingsIcon, { backgroundColor: ORANGE + "18" }]}>
-              <Ionicons name="settings-outline" size={18} color={ORANGE} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.settingsTitle, { color: C.text }]}>Notification settings</Text>
-              <Text style={[s.settingsSub, { color: C.sub }]}>Control what you receive and how</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={C.sub} />
-          </Pressable>
         </ScrollView>
       ) : (
         <ScrollView
@@ -194,13 +332,17 @@ export default function NotificationInbox() {
           {today.length > 0 && (
             <>
               <SectionLabel label="TODAY" C={C} />
-              {today.map((n) => <NotifRow key={n.id} notif={n} C={C} dark={dark} />)}
+              {today.map((n) => (
+                <NotifRow key={n.id} notif={n} C={C} dark={dark} onPress={handleMarkRead} />
+              ))}
             </>
           )}
           {earlier.length > 0 && (
             <>
               <SectionLabel label="EARLIER" C={C} />
-              {earlier.map((n) => <NotifRow key={n.id} notif={n} C={C} dark={dark} />)}
+              {earlier.map((n) => (
+                <NotifRow key={n.id} notif={n} C={C} dark={dark} onPress={handleMarkRead} />
+              ))}
             </>
           )}
         </ScrollView>
@@ -209,18 +351,15 @@ export default function NotificationInbox() {
   );
 }
 
-function isToday(iso: string): boolean {
-  const d = new Date(iso);
-  const n = new Date();
-  return d.getDate() === n.getDate() && d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
-}
-
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
   root: { flex: 1 },
 
-  // Notification rows
+  loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+
+  markAllText: { fontSize: 14, fontWeight: "600", color: ORANGE },
+
   notifRow: {
     flexDirection:    "row",
     alignItems:       "flex-start",
@@ -246,7 +385,7 @@ const s = StyleSheet.create({
   sectionLabel: {
     paddingHorizontal: 16,
     paddingTop:        16,
-    paddingBottom:     6,
+    paddingBottom:      6,
   },
   sectionText: {
     fontSize:      11,
@@ -255,7 +394,6 @@ const s = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  // Empty state
   emptyScroll: { flexGrow: 1, paddingHorizontal: 24 },
   empty: {
     flex:           1,
@@ -279,7 +417,7 @@ const s = StyleSheet.create({
     alignItems:       "center",
     gap:              5,
     paddingHorizontal: 10,
-    paddingVertical:  6,
+    paddingVertical:   6,
     borderRadius:     99,
   },
   categoryChipText: { fontSize: 12, fontWeight: "600" },

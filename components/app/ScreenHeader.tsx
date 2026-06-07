@@ -1,6 +1,7 @@
 // components/app/ScreenHeader.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -15,13 +16,15 @@ export interface HeaderColors {
 interface ScreenHeaderProps {
   title: string;
   C: HeaderColors;
-  /** Replaces "‹ Back" with plain text — use for edit Cancel */
+  /** Replaces "‹ Back" with plain text, use for edit Cancel */
   leftLabel?: string;
   leftAction?: () => void;
   rightLabel?: string;
   rightAction?: () => void;
   rightColor?: string;
   rightLoading?: boolean;
+  /** Arbitrary right-side node, takes precedence over rightLabel/rightAction when provided */
+  rightNode?: ReactNode;
 }
 
 export function ScreenHeader({
@@ -33,6 +36,7 @@ export function ScreenHeader({
   rightAction,
   rightColor = ORANGE,
   rightLoading = false,
+  rightNode,
 }: ScreenHeaderProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -73,7 +77,7 @@ export function ScreenHeader({
 
       {/* Right */}
       <View style={[sh.side, sh.rightSide]}>
-        {rightLabel && rightAction && (
+        {rightNode ?? (rightLabel && rightAction && (
           <Pressable
             onPress={rightLoading ? undefined : rightAction}
             hitSlop={14}
@@ -85,7 +89,7 @@ export function ScreenHeader({
               <Text style={[sh.sideText, { color: rightColor }]}>{rightLabel}</Text>
             )}
           </Pressable>
-        )}
+        ))}
       </View>
     </View>
   );

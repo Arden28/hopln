@@ -1,5 +1,6 @@
 // components/app/JourneyDetailsSheet.tsx
 import { formatDist, usePrefsStore } from "@/store/prefsStore";
+import { shareJourney } from "@/utils/shareJourney";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Linking, Platform } from "react-native";
@@ -240,6 +241,18 @@ export default function JourneyDetailsSheet({
               <Ionicons name={isSaved ? "bookmark" : "bookmark-outline"} size={16} color={ORANGE} />
             )}
             <Text style={s.saveBtnText}>{isSaved ? "Saved" : "Save"}</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [s.saveBtn, { borderColor: C.border, backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}
+            onPress={() => {
+              if (activeJourney?.fromLoc && activeJourney?.toLoc) {
+                shareJourney(activeJourney.fromLoc, activeJourney.toLoc).catch(() => {});
+              }
+            }}
+          >
+            <Ionicons name="share-outline" size={16} color={GREY} />
+            <Text style={[s.saveBtnText, { color: GREY }]}>Share</Text>
           </Pressable>
         </View>
 

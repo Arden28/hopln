@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
+import { useAuthStore } from "@/store/authStore";
 import {
   Dimensions,
   FlatList,
@@ -19,7 +20,7 @@ const SLIDES = [
     key: "navigate",
     icon: "navigate" as const,
     title: "Navigate Nairobi",
-    subtitle: "Find matatu routes, boarding stages, and arrival times — all in one place.",
+    subtitle: "Find matatu routes, boarding stages, and arrival times, all in one place.",
     cardBg: "#FFF3E0",
     cardBgDark: "#2A1800",
     iconColor: "#FF6F00",
@@ -50,6 +51,12 @@ export default function GetStarted() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const dark = useColorScheme() === "dark";
+  const { markOnboardingSeen } = useAuthStore();
+
+  const handleExploreAsGuest = () => {
+    markOnboardingSeen();
+    router.replace("/(tabs)/map");
+  };
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<FlatList>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -170,6 +177,13 @@ export default function GetStarted() {
           <Text style={[styles.signinText, { color: C.textSub }]}>
             Already have an account?{" "}
             <Text style={{ color: C.accent, fontWeight: "600" }}>Sign in</Text>
+          </Text>
+        </Pressable>
+
+        {/* Guest escape hatch — low visual weight, below sign in link */}
+        <Pressable onPress={handleExploreAsGuest} style={styles.guestBtn}>
+          <Text style={[styles.guestText, { color: C.textSub }]}>
+            Explore without signing up
           </Text>
         </Pressable>
       </View>
@@ -313,4 +327,7 @@ const styles = StyleSheet.create({
 
   signinBtn: { alignItems: "center", paddingVertical: 4 },
   signinText: { fontSize: 14 },
+
+  guestBtn:  { alignItems: "center", paddingVertical: 4, marginTop: -4 },
+  guestText: { fontSize: 13 },
 });

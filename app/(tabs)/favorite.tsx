@@ -351,7 +351,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
           </View>
         )}
 
-        {/* Lists card — default + custom */}
+        {/* Lists card, default + custom */}
         <View style={[s.listsCard, { backgroundColor: C.card }]}>
           {allListMeta.map((item, idx) => {
             const count    = listPlaces.filter((p) => p.list === item.key).length;
@@ -382,7 +382,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
           })}
         </View>
 
-        {/* Saved places — horizontal scroll + "See all" */}
+        {/* Saved places, horizontal scroll + "See all" */}
         {listPlaces.length > 0 && (
           <>
             <View style={s.sectionHeader}>

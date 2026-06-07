@@ -36,7 +36,7 @@ module.exports = {
         NSPhotoLibraryUsageDescription: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos.",
         NSPhotoLibraryAddUsageDescription: "Allow $(PRODUCT_NAME) to save photos to your library.",
         ITSAppUsesNonExemptEncryption: false,
-        UIBackgroundModes: ["location"],
+        UIBackgroundModes: ["location", "remote-notification"],
       },
     },
 
@@ -54,6 +54,7 @@ module.exports = {
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
+        "POST_NOTIFICATIONS",
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "READ_EXTERNAL_STORAGE",
@@ -83,6 +84,14 @@ module.exports = {
         {
           locationWhenInUsePermission: "Allow $(PRODUCT_NAME) to use your location to show nearby stops and pick map locations.",
           backgroundPermission: "Hopln uses your location in the background to keep your journey on track.",
+        },
+      ],
+      [
+        "expo-notifications",
+        {
+          icon: "./assets/images/hopln.png",
+          color: "#FF6F00",
+          iosDisplayInForeground: true,
         },
       ],
       [

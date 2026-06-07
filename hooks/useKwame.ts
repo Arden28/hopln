@@ -32,7 +32,7 @@ const VAD_CONFIG = {
   POLL_INTERVAL_MS:       50,
 } as const;
 
-// ─── Recording config — 16 kHz mono, metering enabled for reactive waveform ──
+// ─── Recording config, 16 kHz mono, metering enabled for reactive waveform ──
 
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
   android: {
@@ -78,7 +78,7 @@ export function useKwame(me: Coords | null) {
   const [lastKwameText, setLastKwameText]     = useState('');
   const [isCaptionStreaming, setIsCaptionStreaming] = useState(false);
 
-  // ── State mirrors — avoid stale closures inside setInterval / async callbacks ─
+  // ── State mirrors, avoid stale closures inside setInterval / async callbacks ─
   const statusRef    = useRef<KwameStatus>('idle');
   const voiceModeRef = useRef(false);
   const meRef        = useRef<Coords | null>(me);
@@ -182,7 +182,7 @@ export function useKwame(me: Coords | null) {
           });
           await sound.playAsync();
         } catch (e) {
-          console.warn('TTS playback error — falling back to expo-speech', e);
+          console.warn('TTS playback error, falling back to expo-speech', e);
           Speech.speak(fallbackText, {
             language: 'en-GB', rate: 0.95, pitch: 1.0,
             onDone: resolve,
@@ -213,7 +213,7 @@ export function useKwame(me: Coords | null) {
           // dBFS range: ~−60 to 0 → normalise to 0–1
           setMeterLevel(Math.max(0, Math.min(1, (s.metering + 60) / 60)));
 
-          // VAD — skip the first MIN_RECORD_MS to avoid clipping the start of speech
+          // VAD, skip the first MIN_RECORD_MS to avoid clipping the start of speech
           const elapsed = Date.now() - recordingStartTimeRef.current;
           if (elapsed < VAD_CONFIG.MIN_RECORD_MS) return;
 
@@ -225,7 +225,7 @@ export function useKwame(me: Coords | null) {
               autoStopRef.current?.();
             }
           } else {
-            silenceStartRef.current = null; // voice detected — reset silence timer
+            silenceStartRef.current = null; // voice detected, reset silence timer
           }
         }
       } catch {}

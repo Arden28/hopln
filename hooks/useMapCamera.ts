@@ -14,7 +14,7 @@ export function deltaFromZoom(zoom: number): number {
 
 /**
  * Wraps the react-native-maps camera API in a stable interface.
- * Swap this implementation when changing map providers — map.tsx stays unchanged.
+ * Swap this implementation when changing map providers, map.tsx stays unchanged.
  */
 export function useMapCamera(mapRef: RefObject<MapView | null>) {
   const animateTo = useCallback(

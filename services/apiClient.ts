@@ -21,7 +21,7 @@ const getBaseUrl = () => {
   }
 
   // 3. Fallback pour ton iPhone physique (ton IP locale actuelle)
-  return "http://192.168.100";
+  return "http://192.168.100.1:8000/api/v1";
 };
 
 export const BASE_URL = getBaseUrl();
@@ -36,7 +36,7 @@ const api = axios.create({
     "Content-Type": "application/json",
     Accept: "application/json",
   },
-  timeout: 120000, // 120s — AI pipeline (Whisper + GPT + OTP + TTS) can take up to 90s
+  timeout: 120000, // 120s, AI pipeline (Whisper + GPT + OTP + TTS) can take up to 90s
 });
 
 // --- REQUEST: attach Bearer token + logger ---
@@ -72,8 +72,14 @@ api.interceptors.response.use(
     const isLogoutEndpoint = error.config?.url?.includes("/auth/logout");
 
     if (error.response?.status === 401 && !isLogoutEndpoint) {
-      await useAuthStore.getState().logout();
-      router.replace("/(auth)/login");
+      // Only logout when we actually had a token in the store. Skipping this
+      // prevents unauthenticated requests (e.g. push-token sync fired before
+      // initialize() completes) from wrongly clearing the session.
+      const hadToken = !!useAuthStore.getState().token;
+      if (hadToken) {
+        await useAuthStore.getState().logout();
+        router.replace("/(auth)/login");
+      }
     }
 
     if (error.response && !(isLogoutEndpoint && error.response.status === 401)) {

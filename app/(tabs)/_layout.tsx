@@ -15,6 +15,9 @@ import {
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNotificationStore } from "@/store/notificationStore";
+import { useAuthStore } from "@/store/authStore";
+import GuestWall from "@/components/app/GuestWall";
 import Profile from "./profile";
 import FavoriteScreen from "./favorite";
 import ContributeScreen from "./contribution";
@@ -208,6 +211,7 @@ function CustomTabBar({
   const tabBarBg = dark ? '#1C1C1E' : WHITE;
   const labelColor = dark ? '#EBEBF5' : INACTIVE_BLACK;
   const inactiveIconColor = dark ? '#8E8E93' : '#5F6368';
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
 
   return (
     <View
@@ -228,11 +232,19 @@ function CustomTabBar({
             accessibilityState={{ selected: isActive }}
           >
             <View style={[styles.tabPill, isActive && styles.tabPillActive]}>
-              <Ionicons
-                name={isActive ? tab.iconActive : tab.icon}
-                size={22}
-                color={isActive ? WHITE : inactiveIconColor}
-              />
+              <View>
+                <Ionicons
+                  name={isActive ? tab.iconActive : tab.icon}
+                  size={22}
+                  color={isActive ? WHITE : inactiveIconColor}
+                />
+                {tab.id === "profile" && unreadCount > 0 && (
+                  <View style={[
+                    styles.notifDot,
+                    { borderColor: isActive ? ORANGE : (dark ? '#1C1C1E' : WHITE) },
+                  ]} />
+                )}
+              </View>
             </View>
               {isActive && <Text style={[styles.tabLabel, { color: labelColor }]}>{tab.label}</Text>}
             {!isActive && (
@@ -284,11 +296,12 @@ export default function TabsLayout() {
     setActiveTab("explore");
   };
 
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const dark = useColorScheme() === 'dark';
 
   return (
     <View style={{ flex: 1, backgroundColor: dark ? '#0F0F0F' : '#FFFFFF' }}>
-      {/* expo-router screens — native tab bar hidden */}
+      {/* expo-router screens, native tab bar hidden */}
       <Tabs
         initialRouteName="map"
         screenOptions={{
@@ -307,9 +320,16 @@ export default function TabsLayout() {
         visible={openSheet === "you"}
         onClose={closeSheet}
         snapFraction={0.6}
-        minHeightOffset={230} // Peeking limit
+        minHeightOffset={230}
       >
-        <FavoriteScreen onClose={closeSheet} />
+        {isAuthenticated
+          ? <FavoriteScreen onClose={closeSheet} />
+          : <GuestWall
+              icon="bookmark-outline"
+              title="Your saved places"
+              subtitle="Sign in to save places, journeys, and build custom lists."
+            />
+        }
       </DraggableSheet>
 
       <DraggableSheet
@@ -318,7 +338,14 @@ export default function TabsLayout() {
         snapFraction={0.65}
         minHeightOffset={230}
       >
-        <ContributeScreen />
+        {isAuthenticated
+          ? <ContributeScreen />
+          : <GuestWall
+              icon="add-circle-outline"
+              title="Contribute to Hopln"
+              subtitle="Sign in to report delays, review stops, and earn Safiri Points."
+            />
+        }
       </DraggableSheet>
 
       <DraggableSheet
@@ -327,10 +354,17 @@ export default function TabsLayout() {
         snapFraction={0.85}
         minHeightOffset={230}
       >
-        <Profile />
+        {isAuthenticated
+          ? <Profile />
+          : <GuestWall
+              icon="person-circle-outline"
+              title="Your profile"
+              subtitle="Sign in to manage your account, preferences, and notification settings."
+            />
+        }
       </DraggableSheet>
 
-      {/* ── Floating tab bar — always on top ── */}
+      {/* ── Floating tab bar, always on top ── */}
       <CustomTabBar activeTab={activeTab} onTabPress={handleTabPress} />
     </View>
   );
@@ -408,6 +442,16 @@ const styles = StyleSheet.create({
     fontWeight: "400",
     letterSpacing: 0.2,
     marginTop:  1,
+  },
+  notifDot: {
+    position:     "absolute",
+    top:           -1,
+    right:         -1,
+    width:          8,
+    height:         8,
+    borderRadius:   4,
+    backgroundColor: "#FF3B30",
+    borderWidth:    1.5,
   },
 
   // ── Sheet Body & Common ───────────────────────────────────────────────────────

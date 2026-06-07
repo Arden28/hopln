@@ -83,7 +83,7 @@ export default function MapFloatingUI({
   const showCountdown = distanceToNextStepM != null && distanceToNextStepM > 40;
   const instructionText = nextPreview
     ? showCountdown
-      ? `In ${navDist(distanceToNextStepM!)} — ${nextPreview}`
+      ? `In ${navDist(distanceToNextStepM!)}, ${nextPreview}`
       : nextPreview
     : null;
 
@@ -371,7 +371,7 @@ const s = StyleSheet.create({
     right:      16,
     alignItems: "center",
     gap:        12,
-    zIndex:     25,
+    zIndex:     5,
   },
 
   navBtn: {

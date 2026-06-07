@@ -258,7 +258,7 @@ function LocationPickerModal({
           showsMyLocationButton={false}
         />
 
-        {/* Centered pin — pointer-events none so map panning works */}
+        {/* Centered pin, pointer-events none so map panning works */}
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, lpm.pinContainer]}>
           <Ionicons name="location" size={44} color={ORANGE} style={{ marginBottom: -4 }} />
           <View style={lpm.pinShadow} />
@@ -1264,7 +1264,7 @@ export default function ContributionScreen() {
               {toNext} pts to {stats?.next_level_label ?? "next level"}
             </Text>
           ) : (
-            <Text style={[s.progressHint, { color: GREEN }]}>Max level — Community Elder!</Text>
+            <Text style={[s.progressHint, { color: GREEN }]}>Max level, Community Elder!</Text>
           )}
         </View>
 

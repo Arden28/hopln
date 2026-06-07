@@ -45,7 +45,7 @@ export const VoiceGuide = {
         Speech.speak(text, { language: "en", rate: 1.05, pitch: 1.0 });
       })
       .catch(() => {
-        // Audio session failed — try anyway (works on Android, newer iOS)
+        // Audio session failed, try anyway (works on Android, newer iOS)
         Speech.stop();
         Speech.speak(text, { language: "en", rate: 1.05, pitch: 1.0 });
       });

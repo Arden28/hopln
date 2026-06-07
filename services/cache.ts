@@ -49,12 +49,16 @@ export const CacheService = {
 };
 
 export const CACHE_KEYS = {
-  STOPS_ALL: "stops_all",
-  USER_ME:   "user_me",
+  STOPS_ALL:              "stops_all",
+  USER_ME:                "user_me",
+  SETTINGS_NOTIFICATIONS: "settings_notifications",
+  NOTIFICATIONS_INBOX:    "notifications_inbox",
 } as const;
 
 export const CACHE_TTL = {
-  STOPS:   24 * 60 * 60 * 1000,  // 24 hours — stops change rarely
-  USER:     5 * 60 * 1000,        // 5 minutes
-  DEFAULT:  5 * 60 * 1000,
+  STOPS:                  24 * 60 * 60 * 1000,  // 24 h, stops change rarely
+  USER:                    5 * 60 * 1000,        // 5 min
+  SETTINGS:            7 * 24 * 60 * 60 * 1000,  // 7 days, settings are user-driven
+  NOTIFICATIONS_INBOX:        60 * 1000,         // 1 min, inbox needs to feel live
+  DEFAULT:                 5 * 60 * 1000,
 } as const;

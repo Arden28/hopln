@@ -1,10 +1,16 @@
 // app/(account)/notifications.tsx
 import { ScreenHeader } from "@/components/app/ScreenHeader";
+import { CacheService, CACHE_KEYS, CACHE_TTL } from "@/services/cache";
 import { SettingsService, UserSettings } from "@/services/settings";
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
+import * as Notifications from "expo-notifications";
+import * as Linking from "expo-linking";
+import { useEffect, useState, useCallback } from "react";
 import {
   Alert,
+  AppState,
+  AppStateStatus,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -15,6 +21,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
+const GREEN  = "#10B981";
 const GREY   = "#8E8E93";
 
 function makeC(dark: boolean) {
@@ -27,6 +34,10 @@ function makeC(dark: boolean) {
     icon:      dark ? "#EBEBF5" : "#1C1C1E",
     switchOff: dark ? "#3A3A3C" : "#D1D5DB",
     masterBg:  dark ? "#1C1C1E" : "#FFFFFF",
+    permDeniedBg:   dark ? "rgba(255,59,48,0.12)" : "#FFF5F5",
+    permGrantedBg:  dark ? "rgba(16,185,129,0.10)" : "#F0FFF4",
+    permDeniedText: "#FF3B30",
+    permGrantedText: GREEN,
   };
 }
 
@@ -77,24 +88,69 @@ function ToggleRow({ icon, label, description, value, onChange, C, disabled }: {
   );
 }
 
+// ─── OS permission banner ─────────────────────────────────────────────────────
+
+function OsPermissionBanner({ granted, C }: { granted: boolean | null; C: ReturnType<typeof makeC> }) {
+  if (granted === null) return null; // still loading, show nothing
+
+  if (granted) {
+    return (
+      <View style={[s.permBanner, { backgroundColor: C.permGrantedBg }]}>
+        <Ionicons name="checkmark-circle" size={18} color={GREEN} />
+        <Text style={[s.permText, { color: C.permGrantedText }]}>
+          Notifications are enabled on this device
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={() => Linking.openSettings()}
+      style={({ pressed }) => [s.permBanner, { backgroundColor: C.permDeniedBg, opacity: pressed ? 0.75 : 1 }]}
+    >
+      <Ionicons name="alert-circle" size={18} color={C.permDeniedText} />
+      <Text style={[s.permText, { color: C.permDeniedText, flex: 1 }]}>
+        Notifications are blocked by your device. Tap to open Settings and allow them.
+      </Text>
+      <Ionicons name="chevron-forward" size={14} color={C.permDeniedText} />
+    </Pressable>
+  );
+}
+
 // ─── Key mapping (frontend camelCase → API snake_case) ────────────────────────
 
-const DEFAULTS = {
-  master:           true,
-  sound:            true,
-  routeChanges:     true,
-  disruptions:      true,
-  stopUpdates:      false,
-  busArriving:      true,
-  journeyReminder:  true,
-  turnByTurn:       false,
-  nearbyContrib:    true,
-  pointsEarned:     true,
-  tips:             false,
-  appNews:          false,
+const DEFAULTS: NotifPrefs = {
+  master:          true,
+  sound:           true,
+  routeChanges:    true,
+  disruptions:     true,
+  stopUpdates:     false,
+  busArriving:     true,
+  journeyReminder: true,
+  turnByTurn:      false,
+  nearbyContrib:   true,
+  pointsEarned:    true,
+  tips:            false,
+  appNews:         false,
 };
 
-type PrefKey = keyof typeof DEFAULTS;
+type NotifPrefs = {
+  master:          boolean;
+  sound:           boolean;
+  routeChanges:    boolean;
+  disruptions:     boolean;
+  stopUpdates:     boolean;
+  busArriving:     boolean;
+  journeyReminder: boolean;
+  turnByTurn:      boolean;
+  nearbyContrib:   boolean;
+  pointsEarned:    boolean;
+  tips:            boolean;
+  appNews:         boolean;
+};
+
+type PrefKey = keyof NotifPrefs;
 
 const API_KEY: Record<PrefKey, keyof UserSettings['notifications']> = {
   master:          'master',
@@ -111,46 +167,80 @@ const API_KEY: Record<PrefKey, keyof UserSettings['notifications']> = {
   appNews:         'app_news',
 };
 
+function serverToLocal(n: UserSettings['notifications']): NotifPrefs {
+  return {
+    master:          n.master,
+    sound:           n.sound,
+    routeChanges:    n.route_changes,
+    disruptions:     n.disruptions,
+    stopUpdates:     n.stop_updates,
+    busArriving:     n.bus_arriving,
+    journeyReminder: n.journey_reminder,
+    turnByTurn:      n.turn_by_turn,
+    nearbyContrib:   n.nearby_contrib,
+    pointsEarned:    n.points_earned,
+    tips:            n.tips,
+    appNews:         n.app_news,
+  };
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function Notifications() {
+export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const dark   = useColorScheme() === "dark";
   const C      = makeC(dark);
 
-  const [p, setP] = useState(DEFAULTS);
+  const [p, setP]       = useState<NotifPrefs>(DEFAULTS);
+  const [osGranted, setOsGranted] = useState<boolean | null>(null);
 
-  // Load persisted settings on mount; defaults stay in place on network failure
+  // ── Load settings: cache-first then network ───────────────────────────────
   useEffect(() => {
+    // Instant: show cached value if available
+    CacheService.get<NotifPrefs>(CACHE_KEYS.SETTINGS_NOTIFICATIONS, CACHE_TTL.SETTINGS)
+      .then((cached) => { if (cached) setP(cached); });
+
+    // Background: fetch fresh from server, update cache + UI
     SettingsService.get()
-      .then((s) => setP({
-        master:          s.notifications.master,
-        sound:           s.notifications.sound,
-        routeChanges:    s.notifications.route_changes,
-        disruptions:     s.notifications.disruptions,
-        stopUpdates:     s.notifications.stop_updates,
-        busArriving:     s.notifications.bus_arriving,
-        journeyReminder: s.notifications.journey_reminder,
-        turnByTurn:      s.notifications.turn_by_turn,
-        nearbyContrib:   s.notifications.nearby_contrib,
-        pointsEarned:    s.notifications.points_earned,
-        tips:            s.notifications.tips,
-        appNews:         s.notifications.app_news,
-      }))
-      .catch(() => {});
+      .then((s) => {
+        const local = serverToLocal(s.notifications);
+        setP(local);
+        CacheService.set(CACHE_KEYS.SETTINGS_NOTIFICATIONS, local);
+      })
+      .catch(() => {}); // cached value remains visible on network failure
   }, []);
 
-  // Optimistic toggle: update UI immediately, persist in background, revert on failure
-  const toggle = (key: PrefKey) => {
+  // ── Check OS notification permission ─────────────────────────────────────
+  const checkOsPermission = useCallback(async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    setOsGranted(status === "granted");
+  }, []);
+
+  useEffect(() => {
+    checkOsPermission();
+    // Re-check when user returns from OS settings
+    const sub = AppState.addEventListener("change", (next: AppStateStatus) => {
+      if (next === "active") checkOsPermission();
+    });
+    return () => sub.remove();
+  }, [checkOsPermission]);
+
+  // ── Optimistic toggle ─────────────────────────────────────────────────────
+  const toggle = useCallback((key: PrefKey) => {
     const newVal = !p[key];
-    setP((prev) => ({ ...prev, [key]: newVal }));
+    const next = { ...p, [key]: newVal };
+    setP(next);
+    CacheService.set(CACHE_KEYS.SETTINGS_NOTIFICATIONS, next);
+
     SettingsService.update({
       notifications: { [API_KEY[key]]: newVal } as Partial<UserSettings['notifications']>,
     }).catch(() => {
-      setP((prev) => ({ ...prev, [key]: !newVal }));
+      const reverted = { ...next, [key]: !newVal };
+      setP(reverted);
+      CacheService.set(CACHE_KEYS.SETTINGS_NOTIFICATIONS, reverted);
       Alert.alert("Save failed", "Could not update your notification setting. Please try again.");
     });
-  };
+  }, [p]);
 
   const sub = !p.master;
 
@@ -164,7 +254,10 @@ export default function Notifications() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* ── Master card ──────────────────────────────────────────────────── */}
+        {/* ── Device permission status ──────────────────────────────────── */}
+        <OsPermissionBanner granted={osGranted} C={C} />
+
+        {/* ── Master card ───────────────────────────────────────────────── */}
         <View style={[s.masterCard, { backgroundColor: C.masterBg }]}>
           <View style={s.masterLeft}>
             <View style={[s.masterIconBox, { backgroundColor: sub ? C.switchOff : ORANGE }]}>
@@ -186,7 +279,7 @@ export default function Notifications() {
           />
         </View>
 
-        {/* ── Sound ────────────────────────────────────────────────────────── */}
+        {/* ── Sound ─────────────────────────────────────────────────────── */}
         <Section title="GENERAL" C={C} disabled={sub}>
           <ToggleRow
             C={C} disabled={sub}
@@ -198,7 +291,7 @@ export default function Notifications() {
           />
         </Section>
 
-        {/* ── Transit Alerts ───────────────────────────────────────────────── */}
+        {/* ── Transit Alerts ────────────────────────────────────────────── */}
         <Section title="TRANSIT ALERTS" C={C} disabled={sub}>
           <ToggleRow
             C={C} disabled={sub}
@@ -228,7 +321,7 @@ export default function Notifications() {
           />
         </Section>
 
-        {/* ── Journey ──────────────────────────────────────────────────────── */}
+        {/* ── Journey ───────────────────────────────────────────────────── */}
         <Section title="JOURNEY UPDATES" C={C} disabled={sub}>
           <ToggleRow
             C={C} disabled={sub}
@@ -258,7 +351,7 @@ export default function Notifications() {
           />
         </Section>
 
-        {/* ── Community ────────────────────────────────────────────────────── */}
+        {/* ── Community ─────────────────────────────────────────────────── */}
         <Section title="COMMUNITY" C={C} disabled={sub}>
           <ToggleRow
             C={C} disabled={sub}
@@ -279,7 +372,7 @@ export default function Notifications() {
           />
         </Section>
 
-        {/* ── From Hopln ───────────────────────────────────────────────────── */}
+        {/* ── From Hopln ────────────────────────────────────────────────── */}
         <Section title="FROM HOPLN" C={C} disabled={sub}>
           <ToggleRow
             C={C} disabled={sub}
@@ -310,9 +403,19 @@ export default function Notifications() {
 const s = StyleSheet.create({
   body: {
     paddingHorizontal: 16,
-    paddingTop:        20,
+    paddingTop:        16,
     gap:               16,
   },
+
+  permBanner: {
+    flexDirection:    "row",
+    alignItems:       "center",
+    gap:               8,
+    borderRadius:      12,
+    paddingHorizontal: 14,
+    paddingVertical:   12,
+  },
+  permText: { fontSize: 13, lineHeight: 18, fontWeight: "500" },
 
   masterCard: {
     flexDirection:    "row",
