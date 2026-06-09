@@ -23,7 +23,7 @@ module.exports = {
 
     ios: {
       usesAppleSignIn: true,
-      bundleIdentifier: getBundleId(),
+      bundleIdentifier: "com.navigo.ke",
       buildNumber: "1",
       supportsTablet: true,
       config: {
@@ -42,7 +42,7 @@ module.exports = {
     },
 
     android: {
-      package: getBundleId(),
+      package: "com.navigo.ke",
       versionCode: 1,
       adaptiveIcon: {
         backgroundColor: "#E6F4FE", 
