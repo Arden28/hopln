@@ -26,6 +26,7 @@ module.exports = {
       bundleIdentifier: "com.navigo.ke",
       buildNumber: "1",
       supportsTablet: true,
+      // iOS Maps Config
       config: {
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
       },
@@ -44,6 +45,12 @@ module.exports = {
     android: {
       package: "com.navigo.ke",
       versionCode: 1,
+      // Android Maps Config (Added to fix potential blank map issues)
+      config: {
+        googleMaps: {
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
+        },
+      },
       adaptiveIcon: {
         backgroundColor: "#E6F4FE", 
         foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -91,18 +98,12 @@ module.exports = {
       [
         "expo-notifications",
         {
-          icon: "./assets/images/navigo.png", // Updated to navigo.png
+          icon: "./assets/images/navigo.png",
           color: "#FF6F00",
           iosDisplayInForeground: true,
         },
       ],
-      [
-        "react-native-maps",
-        {
-          iosGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-          androidGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-        },
-      ],
+      // Deleted the react-native-maps plugin block from here!
       [
         "expo-splash-screen",
         {
