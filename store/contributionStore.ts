@@ -94,7 +94,7 @@ export const useContributionStore = create<ContributionStore>()(
       },
     }),
     {
-      name:    "hopln:store:contribution",
+      name:    "navigo:store:contribution",
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         contributions:  state.contributions,

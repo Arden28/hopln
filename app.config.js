@@ -5,35 +5,36 @@ const IS_DEV = process.env.APP_ENV === "development";
 const IS_PREVIEW = process.env.APP_ENV === "preview";
 
 const getBundleId = () => {
-  if (IS_DEV) return "com.hopln.app.dev";
-  if (IS_PREVIEW) return "com.hopln.app.preview";
-  return "com.hopln.app";
+  // if (IS_DEV) return "com.navigo.ke.dev";
+  // if (IS_PREVIEW) return "com.navigo.ke.preview";
+  return "com.navigo.ke";
 };
 
 module.exports = {
   expo: {
-    name: "hopln",
-    slug: "hopln",
+    name: "Navigo",
+    slug: "navigo",
     version: "1.0.0",
     orientation: "portrait",
-    icon: "./assets/images/hopln.png",
-    scheme: "hopln",
+    icon: "./assets/images/navigo.png",
+    scheme: "navigo",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
 
     ios: {
+      usesAppleSignIn: true,
       bundleIdentifier: getBundleId(),
       buildNumber: "1",
       supportsTablet: true,
       config: {
-        googleMapsApiKey: "AIzaSyCu4R4EoyuIdNiY8K-SBKiP6vDc15AqRWU",
+        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
       },
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "We use your location to show nearby stages.",
         NSLocationAlwaysAndWhenInUseUsageDescription: "We use your location to show nearby stages.",
         NSLocationAlwaysUsageDescription: "We use your location to show nearby stages.",
-        NSCameraUsageDescription: "Allow $(PRODUCT_NAME) to use your camera to take stop photos.",
-        NSPhotoLibraryUsageDescription: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos.",
+        NSCameraUsageDescription: "Allow $(PRODUCT_NAME) to use your camera to take transit stop photos and update your profile picture.",
+        NSPhotoLibraryUsageDescription: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos and choose a profile picture.",
         NSPhotoLibraryAddUsageDescription: "Allow $(PRODUCT_NAME) to save photos to your library.",
         ITSAppUsesNonExemptEncryption: false,
         UIBackgroundModes: ["location", "remote-notification"],
@@ -44,7 +45,7 @@ module.exports = {
       package: getBundleId(),
       versionCode: 1,
       adaptiveIcon: {
-        backgroundColor: "#E6F4FE",
+        backgroundColor: "#E6F4FE", 
         foregroundImage: "./assets/images/android-icon-foreground.png",
         monochromeImage: "./assets/images/android-icon-monochrome.png",
       },
@@ -71,11 +72,12 @@ module.exports = {
       "expo-router",
       "expo-secure-store",
       "expo-task-manager",
+      "expo-apple-authentication",
       [
         "expo-image-picker",
         {
-          photosPermission: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos.",
-          cameraPermission: "Allow $(PRODUCT_NAME) to use your camera to take stop photos.",
+          photosPermission: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos and choose a profile picture.",
+          cameraPermission: "Allow $(PRODUCT_NAME) to use your camera to take transit stop photos and update your profile picture.",
           isAccessMediaLocationEnabled: true,
         },
       ],
@@ -83,13 +85,13 @@ module.exports = {
         "expo-location",
         {
           locationWhenInUsePermission: "Allow $(PRODUCT_NAME) to use your location to show nearby stops and pick map locations.",
-          backgroundPermission: "Hopln uses your location in the background to keep your journey on track.",
+          backgroundPermission: "Navigo uses your location in the background to keep your journey on track.",
         },
       ],
       [
         "expo-notifications",
         {
-          icon: "./assets/images/hopln.png",
+          icon: "./assets/images/navigo.png", // Updated to navigo.png
           color: "#FF6F00",
           iosDisplayInForeground: true,
         },
@@ -97,7 +99,7 @@ module.exports = {
       [
         "react-native-maps",
         {
-          iosGoogleMapsApiKey: "AIzaSyCu4R4EoyuIdNiY8K-SBKiP6vDc15AqRWU",
+          iosGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
           androidGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
         },
       ],
@@ -124,10 +126,10 @@ module.exports = {
       router: {},
       googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
       eas: {
-        projectId: "acc62a4b-150f-4ea6-b0f3-296dca0d6683",
+        projectId: "4f1cbaeb-8f43-4f47-9479-ac2fde23a3c2",
       },
     },
 
-    owner: "arden28",
+    owner: "navigo-kenya",
   },
 };

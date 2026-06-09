@@ -17,6 +17,7 @@ interface MapFloatingUIProps {
   onRecenter:         () => void;
   onOpenSearch:       () => void;
   onOpenKwame:        () => void;
+  onOpenReport:       () => void;
   navigating:         boolean;
   followMe:           boolean;
   waitingForBus:      boolean;
@@ -59,6 +60,7 @@ export default function MapFloatingUI({
   eta, remainingDistanceM, distanceToNextStepM, navStatus, stopsRemaining,
   arrivalSoonShown, activeJourney, onClearJourney,
   bottomOffset = 0, gpsLost = false, currentSpeedKph, wrongDirection = false,
+  onOpenReport,
 }: MapFloatingUIProps): JSX.Element {
   const insets    = useSafeAreaInsets();
   const lastTap   = useRef(0);
@@ -218,6 +220,25 @@ export default function MapFloatingUI({
           </View>
         )}
         <View>
+
+          {/* Report Button */}
+          <Pressable
+            onPress={onOpenReport}
+            style={[
+              s.navBtn,
+              { backgroundColor: cardBg },
+              dark && {
+                borderTopColor:    "rgba(255,255,255,0.08)",
+                borderBottomColor: "rgba(0,0,0,0.30)",
+                borderLeftColor:   "rgba(0,0,0,0.12)",
+                borderRightColor:  "rgba(0,0,0,0.12)",
+              },
+            ]}
+          >
+            <Ionicons name="megaphone-outline" size={22} color={ORANGE} />
+          </Pressable>
+
+          {/* Recenter/Compass */}
           <Pressable
             onPress={handleNavBtn}
             style={[
@@ -393,6 +414,7 @@ const s = StyleSheet.create({
     borderLeftColor:   "rgba(0,0,0,0.05)",
     borderRightWidth:  StyleSheet.hairlineWidth,
     borderRightColor:  "rgba(0,0,0,0.05)",
+    marginTop:          8,
   },
   unlockedDot: {
     position:        "absolute",

@@ -1,3 +1,5 @@
+
+// app/get-started.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -5,6 +7,7 @@ import { useAuthStore } from "@/store/authStore";
 import {
   Dimensions,
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -38,7 +41,7 @@ const SLIDES = [
     key: "community",
     icon: "people" as const,
     title: "Built for commuters",
-    subtitle: "Join thousands of Nairobians who navigate smarter with Hopln every day.",
+    subtitle: "Join thousands of Nairobians who navigate smarter with Navigo every day.",
     cardBg: "#F0FDF4",
     cardBgDark: "#002214",
     iconColor: "#22C55E",
@@ -107,10 +110,15 @@ export default function GetStarted() {
       {/* Top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
         <View style={styles.logoRow}>
-          <View style={[styles.logoMark, { backgroundColor: C.accent }]}>
-            <Ionicons name="bus" size={14} color="#FFF" />
-          </View>
-          <Text style={[styles.wordmark, { color: C.text }]}>hopln</Text>
+          <Image 
+            source={
+              dark 
+                ? require("@/assets/images/logo-white.png") 
+                : require("@/assets/images/logo.png")
+            } 
+            style={styles.logoImage} 
+            resizeMode="contain" 
+          />
         </View>
         <Pressable onPress={() => router.push("/(auth)/login")}>
           <Text style={[styles.skipText, { color: C.accent }]}>Sign in</Text>
@@ -172,18 +180,21 @@ export default function GetStarted() {
           />
         </Pressable>
 
+        {/* Guest escape hatch — Now a prominent secondary button */}
+        <Pressable 
+          style={[styles.secondaryBtn, { backgroundColor: C.ghost }]} 
+          onPress={handleExploreAsGuest}
+        >
+          <Text style={[styles.secondaryBtnText, { color: C.text }]}>
+            Explore without signing up
+          </Text>
+        </Pressable>
+
         {/* Sign in link */}
         <Pressable onPress={() => router.push("/(auth)/login")} style={styles.signinBtn}>
           <Text style={[styles.signinText, { color: C.textSub }]}>
             Already have an account?{" "}
             <Text style={{ color: C.accent, fontWeight: "600" }}>Sign in</Text>
-          </Text>
-        </Pressable>
-
-        {/* Guest escape hatch — low visual weight, below sign in link */}
-        <Pressable onPress={handleExploreAsGuest} style={styles.guestBtn}>
-          <Text style={[styles.guestText, { color: C.textSub }]}>
-            Explore without signing up
           </Text>
         </Pressable>
       </View>
@@ -255,15 +266,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 8,
   },
-  logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  logoMark: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
+  logoRow: { flexDirection: "row", alignItems: "center" },
+  logoImage: {
+    height: 42,
+    width: 110, // Adjust width based on your actual logo's aspect ratio
   },
-  wordmark: { fontSize: 20, fontWeight: "800", letterSpacing: -0.5 },
   skipText: { fontSize: 15, fontWeight: "600" },
 
   slide: {
@@ -310,6 +317,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     gap: 6,
+    marginBottom: 8,
   },
   dot: { height: 8, borderRadius: 4 },
   dotActive: { width: 28 },
@@ -325,9 +333,16 @@ const styles = StyleSheet.create({
   },
   primaryText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
 
-  signinBtn: { alignItems: "center", paddingVertical: 4 },
-  signinText: { fontSize: 14 },
+  secondaryBtn: {
+    height: 56,
+    borderRadius: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryBtnText: { fontSize: 16, fontWeight: "600" },
 
-  guestBtn:  { alignItems: "center", paddingVertical: 4, marginTop: -4 },
-  guestText: { fontSize: 13 },
+  signinBtn: { alignItems: "center", paddingVertical: 8 },
+  signinText: { fontSize: 14 },
 });
+

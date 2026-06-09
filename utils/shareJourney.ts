@@ -8,7 +8,7 @@ interface ShareableLocation {
 
 export async function shareJourney(fromLoc: ShareableLocation, toLoc: ShareableLocation): Promise<void> {
   const url =
-    `hopln://journey` +
+    `navigo://journey` +
     `?from=${encodeURIComponent(fromLoc.name)}` +
     `&from_lat=${fromLoc.lat}` +
     `&from_lng=${fromLoc.lng}` +
@@ -17,7 +17,7 @@ export async function shareJourney(fromLoc: ShareableLocation, toLoc: ShareableL
     `&to_lng=${toLoc.lng}`;
 
   await Share.share({
-    message: `Get directions from ${fromLoc.name} to ${toLoc.name} on Hopln:\n${url}`,
+    message: `Get directions from ${fromLoc.name} to ${toLoc.name} on Navigo:\n${url}`,
     url,
   });
 }

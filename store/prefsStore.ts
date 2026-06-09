@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 
-const PREFS_KEY = "hopln:travel_prefs";
+const PREFS_KEY = "navigo:travel_prefs";
 
 export interface TravelPrefs {
   mapApp:        "system" | "google" | "apple" | "waze";

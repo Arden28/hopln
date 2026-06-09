@@ -4,7 +4,7 @@ import * as TaskManager from "expo-task-manager";
 import * as Location from "expo-location";
 import { DeviceEventEmitter } from "react-native";
 
-export const BACKGROUND_LOCATION_TASK = "hopln-background-location";
+export const BACKGROUND_LOCATION_TASK = "navigo-background-location";
 
 /**
  * Register the background location task with expo-task-manager.

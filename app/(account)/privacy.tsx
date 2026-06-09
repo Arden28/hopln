@@ -23,9 +23,9 @@ const GREY   = "#8E8E93";
 const DANGER = "#FF3B30";
 
 // AsyncStorage keys for device-local settings
-const SK_SCREEN_LOCK = "hopln_screen_lock";
-const SK_BG_LOCATION = "hopln_bg_location";
-const SK_PRECISE     = "hopln_precise_location";
+const SK_SCREEN_LOCK = "navigo_screen_lock";
+const SK_BG_LOCATION = "navigo_bg_location";
+const SK_PRECISE     = "navigo_precise_location";
 
 function makeC(dark: boolean) {
   return {
@@ -257,7 +257,7 @@ export default function Privacy() {
             C={C}
             icon="phone-portrait-outline"
             label="Screen lock"
-            description="Require biometrics or PIN to open Hopln"
+            description="Require biometrics or PIN to open Navigo"
             value={screenLock}
             onChange={(v) => {
               setScreenLock(v);
@@ -326,7 +326,7 @@ export default function Privacy() {
             C={C}
             icon="cloud-download-outline"
             label="Download my data"
-            description="Get a copy of everything Hopln has stored"
+            description="Get a copy of everything Navigo has stored"
             onPress={handleExportData}
           />
           <Divider C={C} />
@@ -334,7 +334,7 @@ export default function Privacy() {
             C={C}
             icon="bar-chart-outline"
             label="Share usage analytics"
-            description="Help improve Hopln with anonymous crash reports and feature usage"
+            description="Help improve Navigo with anonymous crash reports and feature usage"
             value={analytics}
             onChange={(v) => {
               setAnalytics(v);
@@ -350,7 +350,7 @@ export default function Privacy() {
             C={C}
             icon="trash-outline"
             label="Delete account"
-            description="Permanently erase all your data from Hopln"
+            description="Permanently erase all your data from Navigo and associated services"
             onPress={handleDeleteAccount}
             danger
           />

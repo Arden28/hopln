@@ -13,7 +13,7 @@ import type { LatLng } from "@/providers/map/types";
 import { RouteService } from "@/services/route";
 import { StopService } from "@/services/stop";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
-import { RouteInfo, Step, Stop, detectManeuver, getRouteColor, humanizeStep, mToNice, sToMin } from "@/utils/mapHelpers";
+import { RouteInfo, Step, Stop, detectManeuver, getReportIcon, getRouteColor, humanizeStep, mToNice, sToMin } from "@/utils/mapHelpers";
 
 import mapStyle     from "@/lib/map_style.json";
 import mapStyleDark from "@/lib/map_style_dark.json";
@@ -26,6 +26,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline } from "react-native-maps";
+import ReportSheet from "@/components/app/ReportSheet";
+import { ReportService, TransitReport, ReportCategory } from "@/services/report";
 
 const ORANGE = "#FF6F00";
 
@@ -283,6 +285,13 @@ export default function MapScreen() {
   const [nearestOpen, setNearestOpen]   = useState(false);
   const [nearestStops, setNearestStops] = useState<UnifiedLocation[]>([]);
 
+  // State to store the reports fetched for the current viewport
+  const [activeReports, setActiveReports] = useState<TransitReport[]>([]);
+
+  // State for the reporting flow
+  const [reportSheetOpen, setReportSheetOpen] = useState(false);
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
   // All stops for map clustering, loaded once on mount
   const [allStops, setAllStops] = useState<Stop[]>([]);
 
@@ -313,6 +322,46 @@ export default function MapScreen() {
   // reference, so heading/speed changes don't trigger unnecessary re-runs.
   const meLat = me?.latitude  ?? null;
   const meLng = me?.longitude ?? null;
+
+  // Handle report submission from the ReportSheet bottom sheet. Requires location permission and optionally authentication.
+  const handleCreateReport = async (type: ReportCategory) => {
+    if (!me) {
+      Alert.alert("Location needed", "We need your current location to drop a report.");
+      return;
+    }
+    
+    // Optional: Protect against spam by requiring auth
+    if (!isAuthenticated) {
+      setReportSheetOpen(false);
+      setShowSaveWall(true); // Reuse your auth wall!
+      return;
+    }
+
+    setIsSubmittingReport(true);
+    try {
+      await ReportService.createReport(me.latitude, me.longitude, type);
+      
+      // Optimistically add it to the map right away so the user feels the instant feedback
+      setActiveReports(prev => [
+        ...prev, 
+        { 
+          id: `temp-${Date.now()}`, 
+          type, 
+          lat: me.latitude, 
+          lng: me.longitude, 
+          upvotes: 0, 
+          expires_at: new Date(Date.now() + 3600000).toISOString() 
+        }
+      ]);
+      
+      setReportSheetOpen(false);
+    } catch (e) {
+      Alert.alert("Error", "Could not submit report. Please check your connection.");
+      console.error(e);
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
 
 
   // ── All stops, fetched once on mount for map clustering ────────────────────
@@ -549,10 +598,30 @@ export default function MapScreen() {
 
   // ── Region change → update zoom + center for StopsLayer ──────────────────────
 
-  const onRegionChangeComplete = useCallback((region: any, details: any) => {
+  // const onRegionChangeComplete = useCallback((region: any, details: any) => {
+  //   if (details?.isGesture) setFollowMe(false);
+  //   setViewZoom(zoomFromDelta(region.latitudeDelta));
+  //   setViewCenter({ lat: region.latitude, lng: region.longitude });
+  // }, []);
+
+  const onRegionChangeComplete = useCallback(async (region: any, details: any) => {
     if (details?.isGesture) setFollowMe(false);
     setViewZoom(zoomFromDelta(region.latitudeDelta));
     setViewCenter({ lat: region.latitude, lng: region.longitude });
+
+    // 1. Calculate the bounding box for the spatial query
+    const north = region.latitude + region.latitudeDelta / 2;
+    const south = region.latitude - region.latitudeDelta / 2;
+    const east = region.longitude + region.longitudeDelta / 2;
+    const west = region.longitude - region.longitudeDelta / 2;
+
+    // 2. Fetch reports from Laravel
+    try {
+      const reports = await ReportService.getReportsInViewport(north, south, east, west);
+      setActiveReports(reports);
+    } catch (err) {
+      console.warn("Failed to fetch viewport reports", err);
+    }
   }, []);
 
   const nextStep    = steps[navState?.stepIndex ?? 0];
@@ -634,6 +703,20 @@ export default function MapScreen() {
           </Marker>
         ))}
 
+        {/* Crowdsourced reports */}
+        {activeReports.map((report) => (
+          <Marker 
+            key={report.id} 
+            coordinate={{ latitude: report.lat, longitude: report.lng }}
+            tracksViewChanges={false}
+            zIndex={4} // High z-index to sit above polylines and intermediate dots
+          >
+            <View style={styles.reportPin}>
+               <Text style={styles.reportIconText}>{getReportIcon(report.type)}</Text>
+            </View>
+          </Marker>
+        ))}
+
         {/* Heading arrow during navigation */}
         {navigating && me && (
           <Marker
@@ -684,6 +767,7 @@ export default function MapScreen() {
           if (chipJustPressedRef.current) { chipJustPressedRef.current = false; return; }
           router.push("/search");
         }}
+        onOpenReport={() => setReportSheetOpen(true)}
         onOpenKwame={() => { chipJustPressedRef.current = true; setNearestOpen(false); router.push("/kwame"); }}
         navigating={navigating}
         followMe={followMe}
@@ -710,6 +794,12 @@ export default function MapScreen() {
         }
       />
 
+      {/* <ReportSheet 
+        isOpen={reportSheetOpen}
+        onClose={() => setReportSheetOpen(false)}
+        onSubmit={handleCreateReport}
+        isSubmitting={isSubmittingReport}
+      /> */}
 
 {!selected && !activeJourney && (
         <NearestStopsSheet nearestOpen={nearestOpen} setNearestOpen={setNearestOpen} nearest={nearestStops} me={me} onSelect={handleSelectStop} />
@@ -862,4 +952,23 @@ const styles = StyleSheet.create({
   saveWallBtnText: { color: "#FFF", fontWeight: "700", fontSize: 16 },
   saveWallDismiss: { paddingVertical: 10 },
   saveWallDismissText: { fontSize: 14, fontWeight: "500" },
+
+  reportPin: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FF3B30", // Using a red border to indicate an alert
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  reportIconText: {
+    fontSize: 14,
+  },
 });

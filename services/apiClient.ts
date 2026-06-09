@@ -6,21 +6,23 @@ import { Platform } from "react-native";
 import { useAuthStore } from "@/store/authStore";
 
 const getBaseUrl = () => {
-  // 1. Priorité absolue à la variable d'environnement si elle existe
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // 2. Pour ton iPhone en Dev Build : on utilise ton IP fixe
-  // On vérifie qu'on n'est pas sur un simulateur/émulateur
+  // Strictly prevent local IPs from leaking into production builds
+  if (!__DEV__) {
+    console.warn("CRITICAL: EXPO_PUBLIC_API_URL is missing in production build!");
+    // You can hardcode your production production URL here as a final safety net, 
+    // e.g., return "https://api.navigo.ke/api/v1";
+    return "https://api.navigo.ke/api/v1"; 
+  }
+
   if (!Platform.isTV && !Constants.isDevice) {
-    // Si c'est un émulateur Android
     if (Platform.OS === "android") return "http://10.0.2.2:8000/api/v1";
-    // Si c'est un simulateur iOS (Mac)
     return "http://localhost:8000/api/v1";
   }
 
-  // 3. Fallback pour ton iPhone physique (ton IP locale actuelle)
   return "http://192.168.100.1:8000/api/v1";
 };
 
@@ -36,7 +38,11 @@ const api = axios.create({
     "Content-Type": "application/json",
     Accept: "application/json",
   },
-  timeout: 120000, // 120s, AI pipeline (Whisper + GPT + OTP + TTS) can take up to 90s
+  timeout: 15000, // 15s default for standard CRUD ops,
+  // Example of how you would call your AI endpoint elsewhere:
+  // await api.post('/journeys/ai-plan', formData, { timeout: 120000 });
+
+  // timeout: 120000, // 120s, AI pipeline (Whisper + GPT + OTP + TTS) can take up to 90s
 });
 
 // --- REQUEST: attach Bearer token + logger ---

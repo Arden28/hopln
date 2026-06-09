@@ -1,4 +1,4 @@
-# Hopln
+# Navigo
 
 > Fast, smooth, and rider-friendly public transport navigation for Nairobi (and beyond) built with **Expo**, **React Native**, and **Mapbox**.
 
@@ -10,14 +10,14 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/arden28/hopln/blob/main/assets/hopln-screenshot.png?raw=true" alt="Hopln App Screenshot" width="300" />
+  <img src="https://github.com/arden28/hopln/blob/main/assets/hopln-screenshot.png?raw=true" alt="Navigo App Screenshot" width="300" />
 </p>
 
 ---
 
 ## 🚀 Overview
 
-**Hopln** is a public transport navigation app designed specifically for Nairobi's matatu and bus system. It helps riders quickly find nearby stages, preview walking routes, and get smooth, real-time navigation guidance.
+**Navigo** is a public transport navigation app designed specifically for Nairobi's matatu and bus system. It helps riders quickly find nearby stages, preview walking routes, and get smooth, real-time navigation guidance.
 
 The app prioritizes:
 - **Map smoothness** - Stable camera with no jittery zooms
@@ -171,7 +171,7 @@ yarn android  # Android Emulator/Device
 
 ### Stop Data from DBF Files
 
-Hopln includes a Node.js script to convert `.dbf` stop files into optimized TypeScript modules:
+Navigo includes a Node.js script to convert `.dbf` stop files into optimized TypeScript modules:
 
 ```bash
 # Place your stops.dbf file at: ./data/stops.dbf
@@ -373,10 +373,10 @@ DeviceEventEmitter.emit('stopSelected', selectedStop);
 | # | Idea | Value |
 |---|------|-------|
 | 27 | **GTFS-RT vehicle tracking** | Overlay real-time vehicle positions on the map using GTFS Realtime feeds. Shows exactly where the next matatu on a route is. |
-| 28 | **Operator dashboard (B2B)** | A web portal for SACCOs and matatu operators to claim their routes, push real-time delay info, and view aggregated ridership data. Positions Hopln as infrastructure. |
+| 28 | **Operator dashboard (B2B)** | A web portal for SACCOs and matatu operators to claim their routes, push real-time delay info, and view aggregated ridership data. Positions Navigo as infrastructure. |
 | 29 | **M-Pesa fare payment** | Deep-link to M-Pesa or integrate a fare wallet so riders can pay the matatu fare through the app. Closes the loop from planning to payment. |
-| 30 | **Hopln Pass (subscription)** | Premium tier: offline Mapbox tile packs, ad-free experience, fare history export, and priority AI planning. Establishes a sustainable revenue stream without compromising the free core. |
-| 31 | **School/corporate commute mode** | Employers or schools provide a Hopln code that pre-loads relevant routes and optionally subsidises the fare. B2B2C distribution channel. |
+| 30 | **Navigo Pass (subscription)** | Premium tier: offline Mapbox tile packs, ad-free experience, fare history export, and priority AI planning. Establishes a sustainable revenue stream without compromising the free core. |
+| 31 | **School/corporate commute mode** | Employers or schools provide a Navigo code that pre-loads relevant routes and optionally subsidises the fare. B2B2C distribution channel. |
 | 32 | **Weather-aware routing** | Surface a rain alert when precipitation is forecast at departure time, and nudge the user to leave earlier or choose a route with less exposed walking. |
 | 33 | **Offline Mapbox tile packs** | Let users download a city-level tile pack (~80–200 MB) from Settings so the map works without connectivity. Requires migrating the main map screen from Google Maps to Mapbox (already installed). |
 | 34 | **Multi-city expansion** | Extend GTFS data coverage to Mombasa and Kisumu. The entire backend and app stack is city-agnostic, only the transit data changes. |

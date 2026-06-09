@@ -3,7 +3,7 @@ import { UserService, SavedPlace, SavedJourney } from "@/services/user";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-const CUSTOM_LISTS_KEY = "hopln:custom_lists";
+const CUSTOM_LISTS_KEY = "navigo:custom_lists";
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
 interface SavedStore {
@@ -109,7 +109,7 @@ export const useSavedStore = create<SavedStore>()(
       },
     }),
     {
-      name:    "hopln:store:saved",
+      name:    "navigo:store:saved",
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         places:        state.places,

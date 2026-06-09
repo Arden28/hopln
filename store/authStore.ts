@@ -7,7 +7,7 @@ import { CacheService } from "@/services/cache";
 import { syncTokenWithBackend, unregisterToken } from "@/services/notifications";
 import { useNotificationStore } from "@/store/notificationStore";
 
-const TOKEN_KEY    = "hopln_auth_token";
+const TOKEN_KEY    = "navigo_auth_token";
 const ME_STALE_MS  = 5 * 60 * 1000; // re-validate /auth/me after 5 min
 
 export interface AuthUser {
@@ -123,7 +123,7 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name:    "hopln:store:auth",
+      name:    "navigo:store:auth",
       storage: createJSONStorage(() => AsyncStorage),
       // Only persist the user object, token stays in SecureStore
       partialize: (state) => ({

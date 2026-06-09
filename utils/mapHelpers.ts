@@ -175,3 +175,14 @@ export function getRouteColor(routeName: string): string {
   };
   return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
+
+export function getReportIcon(type: string) {
+  switch (type) {
+    case 'stage_queue':   return '🚶‍♂️';
+    case 'accident':      return '💥';
+    case 'police_check':  return '👮';
+    case 'flooded_route': return '🌧️';
+    case 'fare_hike':     return '💸';
+    default:              return '⚠️';
+  }
+}

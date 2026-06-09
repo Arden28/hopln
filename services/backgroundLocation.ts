@@ -17,7 +17,7 @@ export async function startBackgroundTracking(): Promise<boolean> {
       distanceInterval: 5,
       showsBackgroundLocationIndicator: true,
       foregroundService: {
-        notificationTitle: "Hopln Navigation",
+        notificationTitle: "Navigo Navigation",
         notificationBody: "Tracking your journey in the background",
         notificationColor: "#FF6F00",
       },

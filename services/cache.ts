@@ -1,7 +1,7 @@
 // services/cache.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const PREFIX  = "hopln:cache:";
+const PREFIX  = "navigo:cache:";
 const CACHE_V = 1; // bump to invalidate all cached entries on schema change
 
 interface CacheEntry<T> {

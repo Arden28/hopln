@@ -372,13 +372,13 @@ export default function NotificationsScreen() {
           />
         </Section>
 
-        {/* ── From Hopln ────────────────────────────────────────────────── */}
-        <Section title="FROM HOPLN" C={C} disabled={sub}>
+        {/* ── From Navigo ────────────────────────────────────────────────── */}
+        <Section title="FROM NAVIGO" C={C} disabled={sub}>
           <ToggleRow
             C={C} disabled={sub}
             icon="bulb-outline"
             label="Tips & tricks"
-            description="Helpful hints to get more out of Hopln"
+            description="Helpful hints to get more out of Navigo"
             value={p.tips}
             onChange={() => toggle("tips")}
           />

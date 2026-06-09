@@ -88,7 +88,7 @@ export default function Register() {
         <View style={styles.header}>
           <Text style={[styles.title, { color: C.text }]}>Create account</Text>
           <Text style={[styles.subtitle, { color: C.textSub }]}>
-            Join Hopln and navigate Nairobi like a local.
+            Join Navigo and navigate Nairobi like a local.
           </Text>
         </View>
 

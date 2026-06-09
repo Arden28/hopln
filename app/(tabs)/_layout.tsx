@@ -21,6 +21,7 @@ import GuestWall from "@/components/app/GuestWall";
 import Profile from "./profile";
 import FavoriteScreen from "./favorite";
 import ContributeScreen from "./contribution";
+import ReportSheet from "@/components/app/ReportSheet";
 
 const ORANGE = "#FF6F00";
 const BLACK = "#000000";
@@ -267,7 +268,7 @@ function ContributeContent() {
   return (
     <View style={styles.sheetBody}>
       <Text style={[styles.sheetTitle, { color: dark ? '#FFFFFF' : BLACK }]}>Contribute</Text>
-      <Text style={styles.sheetSubtitle}>Help improve Safiri for everyone in Nairobi</Text>
+      <Text style={styles.sheetSubtitle}>Help improve Navigo for everyone in Nairobi</Text>
     </View>
   );
 }
@@ -342,11 +343,27 @@ export default function TabsLayout() {
           ? <ContributeScreen />
           : <GuestWall
               icon="add-circle-outline"
-              title="Contribute to Hopln"
-              subtitle="Sign in to report delays, review stops, and earn Safiri Points."
+              title="Contribute to Navigo"
+              subtitle="Sign in to report delays, review stops, and earn Navigo Points."
             />
         }
       </DraggableSheet>
+
+      {/* <DraggableSheet
+        visible={openSheet === "contribute"}
+        onClose={closeSheet}
+        snapFraction={0.70} // Slightly taller for the list layout
+        minHeightOffset={230}
+      >
+        {isAuthenticated
+          ? <ReportSheet onClose={closeSheet} />
+          : <GuestWall
+              icon="add-circle-outline"
+              title="Contribute to Navigo"
+              subtitle="Sign in to report delays, route changes, and warn others about traffic."
+            />
+        }
+      </DraggableSheet> */}
 
       <DraggableSheet
         visible={openSheet === "profile"}
