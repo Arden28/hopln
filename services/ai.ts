@@ -1,32 +1,19 @@
 // services/ai.ts
 import { fetchApi } from "./apiClient";
 
-export interface LatLng {
-  lat: number;
-  lng: number;
-  name?: string;
-}
+export interface LatLng { lat: number; lng: number; name?: string; }
 
 export interface UserContext {
   currentLocation?: LatLng;
-  aliases?: {
-    home?: LatLng;
-    work?: LatLng;
-    school?: LatLng;
-    office?: LatLng;
-  };
+  aliases?: { home?: LatLng; work?: LatLng; school?: LatLng; office?: LatLng; };
   userId?: string;
 }
 
-export interface TransitPlace {
-  name: string;
-  lat: number;
-  lng: number;
-}
+export interface TransitPlace { name: string; lat: number; lng: number; }
 
 export interface TransitLeg {
-  mode: string; // e.g., "WALK", "BUS"
-  routeNumber?: string; // e.g., "111", "46W"
+  mode: string;
+  routeNumber?: string;
   durationSeconds: number;
   from: TransitPlace;
   to: TransitPlace;
@@ -43,13 +30,10 @@ export interface AiPlanResponse {
   route?: RouteSummary | null;
   spoken_response?: string;
   holding_phrase?: string | null;
-  tts_audio?: string | null; // Base64 Native WAV audio payload
+  tts_audio?: string | null; 
 }
 
 export const AiService = {
-  /**
-   * Dispatches multimodal conversational payloads to the backend optimization engine.
-   */
   async planRoute(
     sessionId: string,
     text?: string,
@@ -65,7 +49,7 @@ export const AiService = {
     if (audioBase64) {
       payload.audio = {
         base64: audioBase64,
-        mime: mimeType ?? 'audio/wav'
+        mime: mimeType ?? 'audio/m4a' // Defaulting to Expo's standard output
       };
     }
     
@@ -74,9 +58,7 @@ export const AiService = {
       payload.lng = currentLng;
     }
     
-    if (aliases && Object.keys(aliases).length > 0) {
-      payload.aliases = aliases;
-    }
+    if (aliases && Object.keys(aliases).length > 0) payload.aliases = aliases;
 
     try {
       return await fetchApi<AiPlanResponse>("/journey/ai-plan", {
