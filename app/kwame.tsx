@@ -7,7 +7,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
-import { Audio } from 'expo-av';
+import { useAudioRecorder, useAudioPlayer, RecordingPresets } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { AiService, AiPlanResponse, RouteSummary, TransitLeg } from '../services/ai';
@@ -47,9 +47,10 @@ export default function KwameScreen() {
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
 
-  // Hardware Audio State
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  // Hardware Audio State via modern expo-audio hooks
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [audioPlayerUri, setAudioPlayerUri] = useState<string | null>(null);
+  const audioPlayer = useAudioPlayer(audioPlayerUri);
 
   // Animation Refs
   const voiceTransitionAnim = useRef(new Animated.Value(0)).current; 
@@ -57,50 +58,65 @@ export default function KwameScreen() {
   const ripple1Anim = useRef(new Animated.Value(1)).current;
   const ripple2Anim = useRef(new Animated.Value(1)).current;
   const scrollViewRef = useRef<ScrollView>(null);
+  const animRunner = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     loadHistory(sessionId);
-    return () => {
-      if (recording) recording.stopAndUnloadAsync();
-      if (sound) sound.unloadAsync();
-    };
   }, []);
+
+  // Playback listener for native AI audio 
+  useEffect(() => {
+    if (audioPlayerUri && audioPlayer) {
+      audioPlayer.play();
+      
+      // Fallback timeout to reset UI orb back to idle after speaking completes
+      const playTime = (audioPlayer.duration || 4) * 1000;
+      setTimeout(() => {
+        setVoiceState((prev) => prev === 'speaking' ? 'idle' : prev);
+      }, playTime);
+    }
+  }, [audioPlayerUri, audioPlayer]);
+
+  // JS-driven Organic Amplitude Simulation
+  useEffect(() => {
+    let isActive = true;
+
+    const simulateAudioWaveform = () => {
+      if (!isActive) return;
+      if (uiMode !== 'voice' || voiceState === 'idle') {
+        Animated.spring(orbScaleAnim, { toValue: 1, useNativeDriver: true }).start();
+        return;
+      }
+
+      const minScale = 1.0;
+      const maxScale = voiceState === 'speaking' ? 1.4 : 1.15;
+      const randomAmplitude = Math.random() * (maxScale - minScale) + minScale;
+
+      animRunner.current = Animated.spring(orbScaleAnim, {
+        toValue: randomAmplitude,
+        speed: 25,
+        bounciness: 8,
+        useNativeDriver: true,
+      });
+
+      animRunner.current.start(({ finished }) => {
+        if (finished && isActive) simulateAudioWaveform();
+      });
+    };
+
+    simulateAudioWaveform();
+    return () => { isActive = false; animRunner.current?.stop(); };
+  }, [uiMode, voiceState, orbScaleAnim]);
 
   // Hardware: Start Microphone
   const startRecording = async () => {
     try {
-      if (sound) await sound.unloadAsync(); // Stop Kwame if he's talking
+      if (audioPlayer?.playing) audioPlayer.pause();
       
-      const perm = await Audio.requestPermissionsAsync();
-      if (perm.status !== 'granted') return Alert.alert('Microphone permission required');
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        (status) => {
-          if (status.isRecording && status.metering !== undefined) {
-            // Map decibels (-160 to 0) to a scale multiplier (1.0 to 1.6)
-            const db = Math.max(-60, status.metering);
-            const scale = 1 + ((db + 60) / 60) * 0.6;
-            
-            Animated.spring(orbScaleAnim, {
-              toValue: scale,
-              friction: 4,
-              useNativeDriver: true,
-            }).start();
-          }
-        },
-        50 // Refresh interval for UI fluidity
-      );
-
-      setRecording(recording);
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
       setVoiceState('listening');
 
-      // Start "Courbure" ambient ripples
       Animated.loop(
         Animated.parallel([
           Animated.timing(ripple1Anim, { toValue: 1.5, duration: 1500, easing: Easing.out(Easing.ease), useNativeDriver: true }),
@@ -110,31 +126,28 @@ export default function KwameScreen() {
 
     } catch (err) {
       console.error('Failed to start recording', err);
+      Alert.alert('Microphone Access', 'Please allow microphone permissions in your settings.');
     }
   };
 
   // Hardware: Stop Microphone & Process Base64
   const stopRecording = async () => {
-    if (!recording) return;
+    if (voiceState !== 'listening') return;
     setVoiceState('processing');
     
-    // Stop animations
     ripple1Anim.setValue(1);
     ripple2Anim.setValue(1);
-    Animated.spring(orbScaleAnim, { toValue: 1, useNativeDriver: true }).start();
 
     try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      setRecording(null);
-
+      audioRecorder.stop(); // Completely synchronous now, no await needed!
+  
+      const uri = audioRecorder.uri;
       if (!uri) throw new Error("No recording URI found");
 
       const base64Audio = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      // Get user location for context (Fallback to central Nairobi if disabled)
       let lat = -1.2921, lng = 36.8219;
       const { status } = await Location.getForegroundPermissionsAsync();
       if (status === 'granted') {
@@ -153,28 +166,15 @@ export default function KwameScreen() {
         addMessage({ id: Math.random().toString(), role: 'assistant', text: response.spoken_response, route: response.route });
       }
 
-      // Play the Native Base64 Audio returned by OpenAI
       if (response.tts_audio && isSpeakerOn) {
         setVoiceState('speaking');
-        const audioUri = FileSystem.cacheDirectory + 'kwame_response.wav';
-        await FileSystem.writeAsStringAsync(audioUri, response.tts_audio, {
+        // Cache file dynamically so playback hook resets correctly
+        const fileUri = FileSystem.cacheDirectory + `kwame_response_${Date.now()}.wav`;
+        await FileSystem.writeAsStringAsync(fileUri, response.tts_audio, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: audioUri },
-          { shouldPlay: true },
-          (playbackStatus) => {
-            if (playbackStatus.isLoaded && playbackStatus.didJustFinish) {
-              setVoiceState('idle');
-            } else if (playbackStatus.isLoaded && playbackStatus.isPlaying) {
-              // Simulate speaking amplitude
-              const fakeScale = 1.1 + Math.random() * 0.2;
-              Animated.spring(orbScaleAnim, { toValue: fakeScale, friction: 3, useNativeDriver: true }).start();
-            }
-          }
-        );
-        setSound(newSound);
+        setAudioPlayerUri(fileUri);
       } else {
         setVoiceState('idle');
       }
@@ -186,7 +186,6 @@ export default function KwameScreen() {
     }
   };
 
-  // Hardware: Central Orb Tap Logic
   const handleOrbPress = () => {
     if (isMuted) return;
     if (voiceState === 'idle' || voiceState === 'speaking') {
@@ -196,7 +195,6 @@ export default function KwameScreen() {
     }
   };
 
-  // General Text Handlers
   const toggleUiMode = (targetMode: 'chat' | 'voice') => {
     if (targetMode === 'voice') {
       setUiMode('voice');
@@ -204,7 +202,7 @@ export default function KwameScreen() {
         if (!isMuted) startRecording();
       });
     } else {
-      if (recording) stopRecording();
+      if (voiceState === 'listening') stopRecording();
       Animated.timing(voiceTransitionAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
         setUiMode('chat');
         setVoiceState('idle');
@@ -291,7 +289,7 @@ export default function KwameScreen() {
               <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Settings', 'Voice preferences & language controls.')}>
                 <Ionicons name="settings-outline" size={22} color={C.text} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Menu', 'Clear history?', [{ text: 'Cancel' }, { text: 'Clear', onPress: clearHistory }])}>
+              <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Menu', 'Clear history?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Clear', onPress: clearHistory, style: 'destructive' }])}>
                 <Ionicons name="ellipsis-vertical" size={22} color={C.text} />
               </TouchableOpacity>
             </View>
@@ -315,11 +313,14 @@ export default function KwameScreen() {
                     <TouchableOpacity onPress={() => copyToClipboard(msg.text)} hitSlop={10} style={styles.utilityIcon}>
                       <Ionicons name="copy-outline" size={16} color={C.sub} />
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => Alert.alert('Listen', 'Not available in text mode without generation.')} hitSlop={10} style={styles.utilityIcon}>
+                    <TouchableOpacity onPress={() => Alert.alert('Listen', 'Audio playback is integrated automatically in Voice Mode.')} hitSlop={10} style={styles.utilityIcon}>
                       <Ionicons name="volume-medium-outline" size={18} color={C.sub} />
                     </TouchableOpacity>
                     <TouchableOpacity hitSlop={10} style={styles.utilityIcon}>
                       <Ionicons name="thumbs-up-outline" size={16} color={C.sub} />
+                    </TouchableOpacity>
+                    <TouchableOpacity hitSlop={10} style={styles.utilityIcon}>
+                      <Ionicons name="thumbs-down-outline" size={16} color={C.sub} />
                     </TouchableOpacity>
                   </View>
                 )}
@@ -375,7 +376,6 @@ export default function KwameScreen() {
             </View>
 
             <View style={styles.voiceCenterCore}>
-              {/* Courbure Ripple Rings */}
               {voiceState === 'listening' && (
                 <>
                   <Animated.View style={[styles.rippleRing, { transform: [{ scale: ripple1Anim }], opacity: rippleOpacity }]} />

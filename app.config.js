@@ -80,6 +80,7 @@ module.exports = {
       "expo-secure-store",
       "expo-task-manager",
       "expo-apple-authentication",
+      "expo-audio",
       [
         "expo-image-picker",
         {
