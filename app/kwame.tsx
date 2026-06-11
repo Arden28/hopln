@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { AiService, AiPlanResponse, RouteSummary, TransitLeg } from '../services/ai';
 import { useChatStore } from '../store/chatStore';
