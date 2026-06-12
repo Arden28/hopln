@@ -1,20 +1,32 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView,
-  SafeAreaView, Animated, Dimensions, ActivityIndicator, KeyboardAvoidingView,
-  Platform, useColorScheme, Alert, Easing
+  StyleSheet, View, TextInput, TouchableOpacity, ScrollView,
+  SafeAreaView, Animated, ActivityIndicator, KeyboardAvoidingView,
+  Platform, useColorScheme, Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
-import { useAudioRecorder, useAudioPlayer, RecordingPresets } from 'expo-audio';
-import * as FileSystem from 'expo-file-system/legacy';
+import { useAudioRecorder, useAudioPlayer, AudioModule } from 'expo-audio';
 import * as Location from 'expo-location';
-import { AiService, AiPlanResponse, RouteSummary, TransitLeg } from '../services/ai';
+
+import { AiService, LocationResolutionAction } from '../services/ai';
 import { useChatStore } from '../store/chatStore';
 
-const { width } = Dimensions.get('window');
+// Modular Components
+import ChatHeader from '../components/kwame/ChatHeader';
+import ActionUI from '../components/kwame/ActionUI';
+import RouteCard from '../components/kwame/RouteCard';
+import VoiceOverlay from '../components/kwame/VoiceOverlay';
+import MessageBubble from '../components/kwame/MessageBubble';
+
 const ORANGE = "#FF6F00";
+
+const RECORDING_OPTIONS_WAV = {
+  isMeteringEnabled: true,
+  android: { extension: '.wav', outputFormat: 2, audioEncoder: 3, sampleRate: 44100, numberOfChannels: 1, bitRate: 128000 },
+  ios: { extension: '.wav', audioQuality: 127, sampleRate: 44100, numberOfChannels: 1, bitRate: 128000, linearPCMBitDepth: 16, linearPCMIsBigEndian: false, linearPCMIsFloat: false },
+};
 
 function makeC(dark: boolean) {
   return {
@@ -26,6 +38,7 @@ function makeC(dark: boolean) {
     iconBg:   dark ? "#2C2C2E" : "#E5E5EA",
     bubbleAI: dark ? "#1A1A1A" : "#F2F2F7",
     overlay:  dark ? "#0A0A0A" : "#FFFFFF",
+    actionCard: dark ? "#1C1C1E" : "#F2F2F7",
   };
 }
 
@@ -34,11 +47,9 @@ export default function KwameScreen() {
   const dark = useColorScheme() === 'dark';
   const C = makeC(dark);
 
-  // Global State
   const { messages, addMessage, loadHistory, clearHistory } = useChatStore();
-  const sessionId = useRef(`session_${Math.random().toString(36).substr(2, 9)}`).current;
+  const sessionId = "kwame_main_session";
 
-  // UI State
   const [uiMode, setUiMode] = useState<'chat' | 'voice'>('chat');
   const [voiceState, setVoiceState] = useState<'idle' | 'listening' | 'speaking' | 'processing'>('idle');
   const [inputText, setInputText] = useState('');
@@ -46,13 +57,15 @@ export default function KwameScreen() {
   const [holdingPhrase, setHoldingPhrase] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  
+  // Go to Bottom UX State
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
 
-  // Hardware Audio State via modern expo-audio hooks
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const audioRecorder = useAudioRecorder(RECORDING_OPTIONS_WAV);
   const [audioPlayerUri, setAudioPlayerUri] = useState<string | null>(null);
   const audioPlayer = useAudioPlayer(audioPlayerUri);
 
-  // Animation Refs
   const voiceTransitionAnim = useRef(new Animated.Value(0)).current; 
   const orbScaleAnim = useRef(new Animated.Value(1)).current;
   const ripple1Anim = useRef(new Animated.Value(1)).current;
@@ -60,127 +73,117 @@ export default function KwameScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const animRunner = useRef<Animated.CompositeAnimation | null>(null);
 
-  useEffect(() => {
-    loadHistory(sessionId);
-  }, []);
+  const isProcessing = loading || voiceState === 'processing';
 
-  // Playback listener for native AI audio 
-  useEffect(() => {
-    if (audioPlayerUri && audioPlayer) {
-      audioPlayer.play();
-      
-      // Fallback timeout to reset UI orb back to idle after speaking completes
-      const playTime = (audioPlayer.duration || 4) * 1000;
-      setTimeout(() => {
-        setVoiceState((prev) => prev === 'speaking' ? 'idle' : prev);
-      }, playTime);
-    }
-  }, [audioPlayerUri, audioPlayer]);
-
-  // JS-driven Organic Amplitude Simulation
-  useEffect(() => {
-    let isActive = true;
-
-    const simulateAudioWaveform = () => {
-      if (!isActive) return;
-      if (uiMode !== 'voice' || voiceState === 'idle') {
-        Animated.spring(orbScaleAnim, { toValue: 1, useNativeDriver: true }).start();
-        return;
-      }
-
-      const minScale = 1.0;
-      const maxScale = voiceState === 'speaking' ? 1.4 : 1.15;
-      const randomAmplitude = Math.random() * (maxScale - minScale) + minScale;
-
-      animRunner.current = Animated.spring(orbScaleAnim, {
-        toValue: randomAmplitude,
-        speed: 25,
-        bounciness: 8,
-        useNativeDriver: true,
-      });
-
-      animRunner.current.start(({ finished }) => {
-        if (finished && isActive) simulateAudioWaveform();
-      });
-    };
-
-    simulateAudioWaveform();
-    return () => { isActive = false; animRunner.current?.stop(); };
-  }, [uiMode, voiceState, orbScaleAnim]);
-
-  // Hardware: Start Microphone
-  const startRecording = async () => {
+  const fetchCurrentLocation = async () => {
+    let lat = -1.2921, lng = 36.8219;
     try {
-      if (audioPlayer?.playing) audioPlayer.pause();
-      
-      await audioRecorder.prepareToRecordAsync();
-      audioRecorder.record();
-      setVoiceState('listening');
-
-      Animated.loop(
-        Animated.parallel([
-          Animated.timing(ripple1Anim, { toValue: 1.5, duration: 1500, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          Animated.timing(ripple2Anim, { toValue: 2.0, duration: 1500, easing: Easing.out(Easing.ease), useNativeDriver: true })
-        ])
-      ).start();
-
-    } catch (err) {
-      console.error('Failed to start recording', err);
-      Alert.alert('Microphone Access', 'Please allow microphone permissions in your settings.');
-    }
-  };
-
-  // Hardware: Stop Microphone & Process Base64
-  const stopRecording = async () => {
-    if (voiceState !== 'listening') return;
-    setVoiceState('processing');
-    
-    ripple1Anim.setValue(1);
-    ripple2Anim.setValue(1);
-
-    try {
-      audioRecorder.stop(); // Completely synchronous now, no await needed!
-  
-      const uri = audioRecorder.uri;
-      if (!uri) throw new Error("No recording URI found");
-
-      const base64Audio = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      let lat = -1.2921, lng = 36.8219;
       const { status } = await Location.getForegroundPermissionsAsync();
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         lat = loc.coords.latitude;
         lng = loc.coords.longitude;
       }
+    } catch (e) {}
+    return { lat, lng };
+  };
+  
+  useEffect(() => { loadHistory(sessionId); }, []);
+
+  useEffect(() => {
+    if (audioPlayerUri && audioPlayer) {
+      audioPlayer.play();
+      const playTime = (audioPlayer.duration || 5) * 1000;
+      setTimeout(() => setVoiceState((prev) => prev === 'speaking' ? 'idle' : prev), playTime);
+    }
+  }, [audioPlayerUri, audioPlayer]);
+
+  useEffect(() => {
+    let isActive = true;
+    const simulateAudioWaveform = () => {
+      if (!isActive) return;
+      if (uiMode !== 'voice' || voiceState === 'idle') {
+        Animated.spring(orbScaleAnim, { toValue: 1, useNativeDriver: true }).start();
+        return;
+      }
+      const minScale = 1.0;
+      const maxScale = voiceState === 'speaking' ? 1.4 : 1.15;
+      const randomAmplitude = Math.random() * (maxScale - minScale) + minScale;
+      animRunner.current = Animated.spring(orbScaleAnim, {
+        toValue: randomAmplitude, speed: 25, bounciness: 8, useNativeDriver: true,
+      });
+      animRunner.current.start(({ finished }) => {
+        if (finished && isActive) simulateAudioWaveform();
+      });
+    };
+    simulateAudioWaveform();
+    return () => { isActive = false; animRunner.current?.stop(); };
+  }, [uiMode, voiceState, orbScaleAnim]);
+
+  const startRecording = async () => {
+    try {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) { Alert.alert('Microphone Access', 'Kwame needs microphone access.'); return; }
+      if (audioPlayer?.playing) audioPlayer.pause();
+      
+      await AudioModule.setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+      setVoiceState('listening');
+
+      Animated.loop(Animated.parallel([
+        Animated.timing(ripple1Anim, { toValue: 1.5, duration: 1500, useNativeDriver: true }),
+        Animated.timing(ripple2Anim, { toValue: 2.0, duration: 1500, useNativeDriver: true })
+      ])).start();
+    } catch (err) {
+      setVoiceState('idle');
+      Alert.alert('Microphone Error', 'Could not initialize the microphone hardware.');
+    }
+  };
+
+  const stopRecording = async () => {
+    if (voiceState !== 'listening') return;
+    setVoiceState('processing');
+    ripple1Anim.setValue(1);
+    ripple2Anim.setValue(1);
+
+    try {
+      audioRecorder.stop(); 
+      const uri = audioRecorder.uri;
+      if (!uri) throw new Error("No recording URI found");
+
+      const fileResp = await fetch(uri);
+      const blob = await fileResp.blob();
+      
+      const base64Audio = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.includes(',') ? result.split(',')[1] : result);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      
+      const { lat, lng } = await fetchCurrentLocation();
 
       setHoldingPhrase("Processing your route...");
-
-      const response = await AiService.planRoute(sessionId, undefined, base64Audio, 'audio/m4a', lat, lng);
-      
+      const response = await AiService.planRoute(sessionId, undefined, base64Audio, 'audio/wav', lat, lng);
       setHoldingPhrase(null);
       
       if (response.spoken_response) {
-        addMessage({ id: Math.random().toString(), role: 'assistant', text: response.spoken_response, route: response.route });
+        const newMsgId = Math.random().toString();
+        setStreamingMessageId(newMsgId);
+        addMessage({ id: newMsgId, role: 'assistant', text: response.spoken_response, routes: response.routes, actionRequired: response.actionRequired });
       }
 
       if (response.tts_audio && isSpeakerOn) {
         setVoiceState('speaking');
-        // Cache file dynamically so playback hook resets correctly
-        const fileUri = FileSystem.cacheDirectory + `kwame_response_${Date.now()}.wav`;
-        await FileSystem.writeAsStringAsync(fileUri, response.tts_audio, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-
-        setAudioPlayerUri(fileUri);
+        setAudioPlayerUri(`data:audio/wav;base64,${response.tts_audio}`);
       } else {
         setVoiceState('idle');
       }
-
     } catch (err) {
-      console.error('Processing failed', err);
       setVoiceState('idle');
       setHoldingPhrase(null);
     }
@@ -211,7 +214,7 @@ export default function KwameScreen() {
   };
 
   const handleSendText = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isProcessing) return;
     const userQuery = inputText.trim();
     setInputText('');
     setLoading(true);
@@ -220,10 +223,13 @@ export default function KwameScreen() {
     setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const response = await AiService.planRoute(sessionId, userQuery, undefined, undefined, -1.2921, 36.8219);
-      addMessage({
-        id: Math.random().toString(), role: 'assistant', text: response.spoken_response || '', route: response.route
-      });
+      const { lat, lng } = await fetchCurrentLocation();
+      const response = await AiService.planRoute(sessionId, userQuery, undefined, undefined, lat, lng);
+      
+      const newMsgId = Math.random().toString();
+      setStreamingMessageId(newMsgId);
+      
+      addMessage({ id: newMsgId, role: 'assistant', text: response.spoken_response || '', routes: response.routes, actionRequired: response.actionRequired });
     } catch (err) {
       addMessage({ id: Math.random().toString(), role: 'assistant', text: "Network error, please try again." });
     } finally {
@@ -232,88 +238,78 @@ export default function KwameScreen() {
     }
   };
 
-  const copyToClipboard = async (text: string) => {
-    await Clipboard.setStringAsync(text);
+  const handleSelectSavedPlace = async (placeName: string, pLat: number, pLng: number, action: LocationResolutionAction) => {
+    setLoading(true);
+    const customAliases = { [placeName.toLowerCase()]: { lat: pLat, lng: pLng, name: placeName } };
+    const query = action.field === 'from' 
+        ? `From ${placeName} to ${action.unresolvedName}` 
+        : `Take me to ${placeName}`;
+
+    addMessage({ id: Math.random().toString(), role: 'user', text: `Use saved place: ${placeName}` });
+    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+
+    try {
+      const { lat, lng } = await fetchCurrentLocation();
+      const response = await AiService.planRoute(sessionId, query, undefined, undefined, lat, lng, customAliases);
+      
+      const newMsgId = Math.random().toString();
+      setStreamingMessageId(newMsgId);
+      addMessage({ id: newMsgId, role: 'assistant', text: response.spoken_response || '', routes: response.routes, actionRequired: response.actionRequired });
+    } catch (err) {
+      addMessage({ id: Math.random().toString(), role: 'assistant', text: "Failed to recalculate." });
+    } finally {
+      setLoading(false);
+      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+    }
   };
 
-  const renderRouteDetails = (route: RouteSummary) => {
-    return (
-      <View style={[styles.routeCard, { backgroundColor: C.card, borderColor: C.border }]}>
-        <View style={[styles.routeHeader, { borderBottomColor: C.border }]}>
-          <Text style={[styles.routeHeadline, { color: C.text }]}>{route.summary || "Suggested Travel Plan"}</Text>
-          <Text style={styles.routeDuration}>{Math.round(route.total_duration / 60)} min</Text>
-        </View>
+  const copyToClipboard = async (text: string) => { await Clipboard.setStringAsync(text); };
 
-        {route.legs && route.legs.map((leg: TransitLeg, index: number) => (
-          <View key={index} style={styles.legRow}>
-            <View style={styles.indicatorContainer}>
-              <View style={[styles.indicatorNode, leg.mode === 'WALK' ? { backgroundColor: C.sub } : styles.transitNode]} />
-              {index < route.legs.length - 1 && <View style={[styles.indicatorLine, { backgroundColor: C.border }]} />}
-            </View>
-            <View style={styles.legContent}>
-              <Text style={[styles.legTitle, { color: C.text }]}>
-                {leg.mode === 'WALK' ? 'Walk to stage' : `Board Matatu Route ${leg.routeNumber || 'Transit'}`}
-              </Text>
-              <Text style={[styles.legSubtext, { color: C.sub }]}>
-                From <Text style={[styles.boldText, { color: C.text }]}>{leg.from.name}</Text> to <Text style={[styles.boldText, { color: C.text }]}>{leg.to.name}</Text>
-              </Text>
-            </View>
-          </View>
-        ))}
-      </View>
-    );
+  // Track scroll position to show/hide the "Go To Bottom" FAB
+  const handleScroll = (event: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    // Show button if we are scrolled up more than 150px from the bottom
+    const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 150;
+    setShowScrollBottom(!isCloseToBottom);
+  };
+
+  const scrollToBottom = () => {
+    scrollViewRef.current?.scrollToEnd({ animated: true });
   };
 
   const chatScale = voiceTransitionAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.96] });
   const chatOpacity = voiceTransitionAnim.interpolate({ inputRange: [0, 0.8], outputRange: [1, 0] });
   const voiceContainerOpacity = voiceTransitionAnim.interpolate({ inputRange: [0, 0.2], outputRange: [0, 1] });
   const voiceContainerScale = voiceTransitionAnim.interpolate({ inputRange: [0, 1], outputRange: [1.1, 1] });
-  
-  const rippleOpacity = ripple1Anim.interpolate({ inputRange: [1, 1.5], outputRange: [0.5, 0] });
-  const ripple2Opacity = ripple2Anim.interpolate({ inputRange: [1, 2], outputRange: [0.3, 0] });
 
   return (
     <SafeAreaView style={[styles.masterContainer, { backgroundColor: C.bg }]}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.masterContainer}>
         
-        {/* ================= SCREEN 1: TEXT CHAT MODE ================= */}
         <Animated.View style={[styles.chatView, { transform: [{ scale: chatScale }], opacity: chatOpacity }]} pointerEvents={uiMode === 'chat' ? 'auto' : 'none'}>
-          <View style={[styles.topBar, { backgroundColor: C.bg, borderBottomColor: C.border }]}>
-            <View style={styles.topLeftRow}>
-              <TouchableOpacity style={styles.backButton} onPress={() => router.back()} hitSlop={15}>
-                <Ionicons name="chevron-back" size={26} color={C.text} />
-              </TouchableOpacity>
-              <Text style={[styles.brandTitle, { color: C.text }]}>Navigo <Text style={styles.accentText}>Kwame</Text></Text>
-            </View>
-            <View style={styles.topActionsRow}>
-              <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Settings', 'Voice preferences & language controls.')}>
-                <Ionicons name="settings-outline" size={22} color={C.text} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Menu', 'Clear history?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Clear', onPress: clearHistory, style: 'destructive' }])}>
-                <Ionicons name="ellipsis-vertical" size={22} color={C.text} />
-              </TouchableOpacity>
-            </View>
-          </View>
+          <ChatHeader C={C} router={router} clearHistory={clearHistory} />
 
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.scrollContainer}
-            contentContainerStyle={styles.scrollContent}
+          <ScrollView 
+            ref={scrollViewRef} 
+            style={styles.scrollContainer} 
+            contentContainerStyle={styles.scrollContent} 
             showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
           >
             {messages.map((msg) => (
               <View key={msg.id} style={[styles.bubbleWrapper, msg.role === 'user' ? styles.userWrapper : styles.aiWrapper]}>
-                <View style={[styles.messageBubble, msg.role === 'user' ? styles.userBubble : [styles.aiBubble, { backgroundColor: C.bubbleAI }]]}>
-                  <Text style={[styles.messageText, { color: msg.role === 'user' ? '#FFFFFF' : C.text }]}>{msg.text}</Text>
-                </View>
-                {msg.route && renderRouteDetails(msg.route)}
+                
+                <MessageBubble msg={msg} C={C} isStreaming={msg.id === streamingMessageId} />
+                <ActionUI msg={msg} C={C} router={router} onSelectPlace={handleSelectSavedPlace} />
+                {msg.routes && msg.routes.map((route, i) => <RouteCard key={i} route={route} index={i} C={C} />)}
 
                 {msg.role === 'assistant' && (
                   <View style={styles.bubbleUtilityRow}>
                     <TouchableOpacity onPress={() => copyToClipboard(msg.text)} hitSlop={10} style={styles.utilityIcon}>
                       <Ionicons name="copy-outline" size={16} color={C.sub} />
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => Alert.alert('Listen', 'Audio playback is integrated automatically in Voice Mode.')} hitSlop={10} style={styles.utilityIcon}>
+                    <TouchableOpacity hitSlop={10} style={styles.utilityIcon}>
                       <Ionicons name="volume-medium-outline" size={18} color={C.sub} />
                     </TouchableOpacity>
                     <TouchableOpacity hitSlop={10} style={styles.utilityIcon}>
@@ -326,82 +322,76 @@ export default function KwameScreen() {
                 )}
               </View>
             ))}
+            
             {loading && (
               <View style={[styles.bubbleWrapper, styles.aiWrapper]}>
-                <View style={[styles.messageBubble, styles.aiBubble, styles.loaderBubble, { backgroundColor: C.bubbleAI }]}>
+                <View style={[styles.loaderBubble, { backgroundColor: C.bubbleAI }]}>
                   <ActivityIndicator color={ORANGE} size="small" />
                 </View>
               </View>
             )}
           </ScrollView>
 
+          {/* Elegant Floating "Go To Bottom" Button */}
+          {showScrollBottom && (
+            <Animated.View style={styles.fabContainer}>
+              <TouchableOpacity style={[styles.fab, { backgroundColor: C.card, borderColor: C.border }]} onPress={scrollToBottom} activeOpacity={0.8}>
+                <Ionicons name="chevron-down" size={24} color={ORANGE} />
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+
           <View style={[styles.bottomInputDock, { backgroundColor: C.bg, borderTopColor: C.border }]}>
-            <View style={[styles.inputPillContainer, { backgroundColor: C.card }]}>
-              <TouchableOpacity style={styles.dockAddonButton}>
+            <View style={[styles.inputPillContainer, { backgroundColor: C.card, opacity: isProcessing ? 0.6 : 1 }]}>
+              <TouchableOpacity style={styles.dockAddonButton} disabled={isProcessing}>
                 <Ionicons name="add" size={24} color={C.sub} />
               </TouchableOpacity>
-              <TextInput
-                style={[styles.textInputField, { color: C.text }]}
-                placeholder="Message Kwame..."
-                placeholderTextColor={C.sub}
-                value={inputText}
-                onChangeText={setInputText}
+              <TextInput 
+                style={[styles.textInputField, { color: C.text }]} 
+                placeholder={isProcessing ? "Kwame is thinking..." : "Message Kwame..."} 
+                placeholderTextColor={C.sub} 
+                value={inputText} 
+                onChangeText={setInputText} 
+                editable={!isProcessing} // <-- UX Disable
               />
             </View>
             {inputText.trim().length > 0 ? (
-              <TouchableOpacity style={styles.primaryActionButton} onPress={handleSendText}>
+              <TouchableOpacity 
+                style={[styles.primaryActionButton, isProcessing && { backgroundColor: C.sub }]} 
+                onPress={handleSendText}
+                disabled={isProcessing} // <-- UX Disable
+              >
                 <Ionicons name="arrow-up" size={20} color="#FFFFFF" />
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={styles.primaryActionButton} onPress={() => toggleUiMode('voice')}>
+              <TouchableOpacity 
+                style={[styles.primaryActionButton, isProcessing && { backgroundColor: C.sub }]} 
+                onPress={() => toggleUiMode('voice')}
+                disabled={isProcessing} // <-- UX Disable
+              >
                 <Ionicons name="pulse" size={20} color="#FFFFFF" />
               </TouchableOpacity>
             )}
           </View>
         </Animated.View>
 
-        {/* ================= SCREEN 2: PREMIUM VOICE MODE OVERLAY ================= */}
         {uiMode === 'voice' && (
-          <Animated.View style={[styles.voiceFullscreenOverlay, { backgroundColor: C.overlay, opacity: voiceContainerOpacity, transform: [{ scale: voiceContainerScale }] }]}>
-            <View style={styles.voiceUpperTrack}>
-              <Text style={styles.voiceAssistantName}>Kwame Voice</Text>
-              <Text style={styles.voiceStatusIndicator}>
-                {voiceState === 'listening' ? 'Listening...' : voiceState === 'processing' ? 'Thinking...' : voiceState === 'speaking' ? 'Speaking...' : 'Tap to speak'}
-              </Text>
-              <View style={styles.transcriptionWrapper}>
-                <Text style={[styles.realtimeLiveText, { color: C.text }]}>
-                  {holdingPhrase || (voiceState === 'listening' ? "Go ahead, I'm listening..." : "Ready when you are.")}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.voiceCenterCore}>
-              {voiceState === 'listening' && (
-                <>
-                  <Animated.View style={[styles.rippleRing, { transform: [{ scale: ripple1Anim }], opacity: rippleOpacity }]} />
-                  <Animated.View style={[styles.rippleRing, { transform: [{ scale: ripple2Anim }], opacity: ripple2Opacity }]} />
-                </>
-              )}
-              
-              <TouchableOpacity activeOpacity={1} onPress={handleOrbPress}>
-                <Animated.View style={[styles.centralVoiceOrb, { transform: [{ scale: orbScaleAnim }] }, voiceState === 'listening' && styles.orbListeningGlow, voiceState === 'speaking' && styles.orbSpeakingGlow, isMuted && styles.micMutedState]}>
-                   <Ionicons name={voiceState === 'processing' ? "sync" : "mic"} size={48} color="#FFFFFF" style={styles.orbInnerIcon} />
-                </Animated.View>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.voiceActionFooter}>
-              <TouchableOpacity style={[styles.voiceSecondaryControl, { backgroundColor: C.iconBg, borderColor: C.border }, !isSpeakerOn && styles.controlDisabled]} onPress={() => setIsSpeakerOn(!isSpeakerOn)}>
-                <Ionicons name={isSpeakerOn ? "volume-high" : "volume-mute"} size={22} color={C.text} />
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.voiceMicMasterCircle, isMuted && styles.micMutedState]} onPress={() => setIsMuted(!isMuted)}>
-                <Ionicons name={isMuted ? "mic-off" : "mic"} size={32} color="#FFFFFF" />
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.voiceSecondaryControl, { backgroundColor: C.iconBg, borderColor: C.border }]} onPress={() => toggleUiMode('chat')}>
-                <Ionicons name="close" size={24} color={C.text} />
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
+          <VoiceOverlay 
+            C={C}
+            voiceState={voiceState}
+            holdingPhrase={holdingPhrase}
+            ripple1Anim={ripple1Anim}
+            ripple2Anim={ripple2Anim}
+            orbScaleAnim={orbScaleAnim}
+            isMuted={isMuted}
+            isSpeakerOn={isSpeakerOn}
+            voiceContainerOpacity={voiceContainerOpacity}
+            voiceContainerScale={voiceContainerScale}
+            handleOrbPress={handleOrbPress}
+            setIsSpeakerOn={setIsSpeakerOn}
+            setIsMuted={setIsMuted}
+            toggleUiMode={toggleUiMode}
+          />
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -411,58 +401,22 @@ export default function KwameScreen() {
 const styles = StyleSheet.create({
   masterContainer: { flex: 1 },
   chatView: { flex: 1, width: '100%', height: '100%' },
-  topBar: { height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },
-  topLeftRow: { flexDirection: 'row', alignItems: 'center' },
-  backButton: { marginRight: 8, marginLeft: -4 },
-  brandTitle: { fontSize: 19, fontWeight: '700', letterSpacing: -0.3 },
-  accentText: { color: ORANGE },
-  topActionsRow: { flexDirection: 'row', alignItems: 'center' },
-  iconButton: { padding: 6, marginLeft: 6 },
   scrollContainer: { flex: 1 },
   scrollContent: { paddingVertical: 20, paddingHorizontal: 14 },
   bubbleWrapper: { marginBottom: 16, width: '100%', flexDirection: 'column' },
   userWrapper: { alignItems: 'flex-end' },
   aiWrapper: { alignItems: 'flex-start' },
-  messageBubble: { maxWidth: width * 0.82, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 18 },
-  userBubble: { backgroundColor: ORANGE, borderBottomRightRadius: 4 },
-  aiBubble: { borderBottomLeftRadius: 4 },
   bubbleUtilityRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginLeft: 8, gap: 16 },
   utilityIcon: { padding: 2 },
-  loaderBubble: { paddingHorizontal: 24, justifyContent: 'center', alignItems: 'center' },
-  messageText: { fontSize: 15, lineHeight: 21 },
+  loaderBubble: { paddingHorizontal: 24, paddingVertical: 14, borderTopLeftRadius: 4, borderTopRightRadius: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  
+  /* FAB UX Styling */
+  fabContainer: { position: 'absolute', bottom: 70, right: 16, zIndex: 10 },
+  fab: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 4 },
+  
   bottomInputDock: { paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
   inputPillContainer: { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', borderRadius: 22, paddingHorizontal: 12, marginRight: 10 },
   dockAddonButton: { marginRight: 4, padding: 4 },
   textInputField: { flex: 1, fontSize: 15, paddingVertical: 0 },
   primaryActionButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: ORANGE, justifyContent: 'center', alignItems: 'center' },
-  routeCard: { width: width * 0.85, borderRadius: 14, padding: 14, marginTop: 8, borderWidth: StyleSheet.hairlineWidth },
-  routeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: 8 },
-  routeHeadline: { fontSize: 14, fontWeight: '600', flex: 1, marginRight: 8 },
-  routeDuration: { color: ORANGE, fontSize: 14, fontWeight: '700' },
-  legRow: { flexDirection: 'row', minHeight: 45 },
-  indicatorContainer: { alignItems: 'center', marginRight: 12, width: 12 },
-  indicatorNode: { width: 10, height: 10, borderRadius: 5, marginTop: 4 },
-  transitNode: { backgroundColor: ORANGE },
-  indicatorLine: { flex: 1, width: 2, marginVertical: 4 },
-  legContent: { flex: 1, paddingBottom: 10 },
-  legTitle: { fontSize: 13, fontWeight: '600' },
-  legSubtext: { fontSize: 12, marginTop: 2 },
-  boldText: { fontWeight: '500' },
-  voiceFullscreenOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'space-between', paddingVertical: 40, paddingHorizontal: 24, zIndex: 9999 },
-  voiceUpperTrack: { alignItems: 'center', marginTop: 20 },
-  voiceAssistantName: { fontSize: 15, color: '#B3B3B3', fontWeight: '500', letterSpacing: 0.5 },
-  voiceStatusIndicator: { fontSize: 13, color: ORANGE, marginTop: 4, fontWeight: '600' },
-  transcriptionWrapper: { marginTop: 40, paddingHorizontal: 10 },
-  realtimeLiveText: { fontSize: 20, textAlign: 'center', lineHeight: 28, fontWeight: '400' },
-  voiceCenterCore: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  rippleRing: { position: 'absolute', width: 140, height: 140, borderRadius: 70, backgroundColor: ORANGE },
-  centralVoiceOrb: { width: 140, height: 140, borderRadius: 70, backgroundColor: ORANGE, justifyContent: 'center', alignItems: 'center', shadowColor: ORANGE, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 25, elevation: 15 },
-  orbInnerIcon: { opacity: 0.9 },
-  orbListeningGlow: { shadowRadius: 40, shadowOpacity: 0.8, backgroundColor: '#FF8F00' },
-  orbSpeakingGlow: { shadowRadius: 30, shadowOpacity: 0.9 },
-  voiceActionFooter: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginBottom: 15, paddingHorizontal: 20 },
-  voiceSecondaryControl: { width: 52, height: 52, borderRadius: 26, justifyContent: 'center', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth },
-  controlDisabled: { opacity: 0.4 },
-  voiceMicMasterCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: ORANGE, justifyContent: 'center', alignItems: 'center', shadowColor: ORANGE, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
-  micMutedState: { backgroundColor: '#331A00', borderWidth: 1, borderColor: ORANGE },
 });

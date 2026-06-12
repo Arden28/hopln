@@ -123,6 +123,7 @@ export async function fetchApi<T>(
       method: options.method || "GET",
       data: options.body ? JSON.parse(options.body) : undefined,
       headers: options.headers,
+      timeout: options.timeout || 15000,
     });
     return response.data;
   } catch (error) {

@@ -19,6 +19,7 @@ export interface RouteSegment {
   duration: number;
   distance: number;
   route_name?: string;
+  route_color?: string | null;
   /** Google Polyline5-encoded geometry. Kept for backward compat; prefer `coordinates`. */
   polyline: string;
   /** Decoded [[lat, lng], ...] pairs, use these directly with Google Maps or any renderer. */

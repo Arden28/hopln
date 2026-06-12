@@ -24,6 +24,9 @@ module.exports = {
     ios: {
       usesAppleSignIn: true,
       bundleIdentifier: "com.navigo.ke",
+      associatedDomains: [
+        "applinks:navigo.co.ke"
+      ],
       buildNumber: "1",
       supportsTablet: true,
       // iOS Maps Config
@@ -44,6 +47,23 @@ module.exports = {
 
     android: {
       package: "com.navigo.ke",
+      intentFilters: [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "navigo.co.ke",
+              "pathPrefix": "/route"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
       versionCode: 1,
       // Android Maps Config (Added to fix potential blank map issues)
       config: {
@@ -76,6 +96,7 @@ module.exports = {
     },
 
     plugins: [
+      "expo-asset",
       "expo-router",
       "expo-secure-store",
       "expo-task-manager",

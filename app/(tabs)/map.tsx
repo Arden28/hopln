@@ -62,7 +62,7 @@ function IntermediateStopDot({ color }: { color: string }) {
 }
 
 // Route-coloured circle with matatu icon, used for board / alight nodes
-function StopNodeMarker({ color }: { color: string }) {
+function StopNodeMarker({ color, onLoad }: { color: string; onLoad: () => void }) {
   return (
     <View style={{
       width: 30, height: 30, borderRadius: 15,
@@ -72,8 +72,27 @@ function StopNodeMarker({ color }: { color: string }) {
       shadowColor: "#000", shadowOpacity: 0.28,
       shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 8,
     }}>
-      <Image source={require("@/assets/images/matatu.png")} style={{ width: 16, height: 16 }} resizeMode="contain" />
+      <Image 
+        source={require("@/assets/images/matatu.png")} 
+        style={{ width: 16, height: 16 }} 
+        resizeMode="contain" 
+        onLoad={onLoad} // Pass the event up!
+      />
     </View>
+  );
+}
+
+function TrackedNodeMarker({ m }: { m: NodeMarker }) {
+  const [tracking, setTracking] = useState(true);
+  
+  return (
+    <Marker
+      coordinate={m.coord}
+      tracksViewChanges={tracking}
+      anchor={{ x: 0.5, y: 0.5 }}
+    >
+      <StopNodeMarker color={m.color} onLoad={() => setTracking(false)} />
+    </Marker>
   );
 }
 
@@ -117,6 +136,16 @@ function SquarePin({ isStart }: { isStart: boolean }) {
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.45)" }} />
     </View>
   );
+}
+
+// Force valid hex colors for the map engine
+function sanitizeHex(color: string | null | undefined, fallbackName: string): string {
+  if (!color) return getRouteColor(fallbackName);
+  let clean = color.trim();
+  if (!clean.startsWith("#")) clean = "#" + clean;
+  // Fallback to our generator if the DB gives us invalid garbage like "#blue"
+  const isValid = /^#([0-9A-F]{3}|[0-9A-F]{6}|[0-9A-F]{8})$/i.test(clean);
+  return isValid ? clean : getRouteColor(fallbackName);
 }
 
 // Nairobi city centre default
@@ -224,6 +253,7 @@ export default function MapScreen() {
   const { prefs, load: loadPrefs } = usePrefsStore();
   useEffect(() => { loadPrefs(); }, [loadPrefs]);
 
+  
   const isSaved = useMemo(() =>
     activeJourney
       ? journeys.some((j) =>
@@ -438,12 +468,19 @@ export default function MapScreen() {
         const newLocMarkers: LocMarker[]       = [];
         const newIntermStops: IntermediateStop[] = [];
 
-        if (fromLoc._type === "location" && fromLoc.id !== "current_location") {
+        if (fromLoc._type !== "stop" && fromLoc.id !== "current_location") {
           newLocMarkers.push({ id: "loc-from", coord: { latitude: fromLoc.lat, longitude: fromLoc.lng }, name: fromLoc.name, isStart: true });
         }
-        if (toLoc._type === "location" && toLoc.id !== "current_location") {
+        if (toLoc._type !== "stop" && toLoc.id !== "current_location") {
           newLocMarkers.push({ id: "loc-to", coord: { latitude: toLoc.lat, longitude: toLoc.lng }, name: toLoc.name, isStart: false });
         }
+
+        // if (fromLoc._type === "location" && fromLoc.id !== "current_location") {
+        //   newLocMarkers.push({ id: "loc-from", coord: { latitude: fromLoc.lat, longitude: fromLoc.lng }, name: fromLoc.name, isStart: true });
+        // }
+        // if (toLoc._type === "location" && toLoc.id !== "current_location") {
+        //   newLocMarkers.push({ id: "loc-to", coord: { latitude: toLoc.lat, longitude: toLoc.lng }, name: toLoc.name, isStart: false });
+        // }
 
         // Collect all coords for initial camera fit
         let allCoords: LatLng[] = [];
@@ -477,7 +514,7 @@ export default function MapScreen() {
               })),
             });
           } else {
-            const color    = getRouteColor(seg.route_name ?? "");
+            const color    = sanitizeHex(seg.route_color, seg.route_name ?? "");
             const fromName = seg.from.name === "Origin"      ? fromLoc.name : seg.from.name;
             const toName   = seg.to.name   === "Destination" ? toLoc.name   : seg.to.name;
 
@@ -649,18 +686,19 @@ export default function MapScreen() {
             strokeColor="#8E8E93"
             strokeWidth={3}
             lineDashPattern={[6, 5]}
-            zIndex={1}
+            // zIndex={1}
           />
         ))}
 
         {/* Transit route legs, road-snapped, solid, route-coloured */}
         {transitLegs.map((leg) => (
+          
           <Polyline
-            key={leg.id}
+            key={`${leg.id}-${leg.color}`}
             coordinates={leg.coords}
             strokeColor={leg.color}
             strokeWidth={5}
-            zIndex={2}
+            // zIndex={2}
             geodesic
           />
         ))}
@@ -681,14 +719,7 @@ export default function MapScreen() {
 
         {/* Board/alight node markers, route-coloured circle with matatu icon */}
         {nodeMarkers.map((m) => (
-          <Marker
-            key={m.id}
-            coordinate={m.coord}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <StopNodeMarker color={m.color} />
-          </Marker>
+          <TrackedNodeMarker key={m.id} m={m} />
         ))}
 
         {/* Origin / destination, branded rounded square (Uber-style) */}

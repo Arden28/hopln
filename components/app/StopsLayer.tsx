@@ -60,6 +60,53 @@ type Props = {
   onPress: (stop: Stop) => void;
 };
 
+function IndividualStopMarker({ c, onPress }: { c: Cluster; onPress: (stop: Stop) => void }) {
+  const [tracking, setTracking] = React.useState(true);
+  
+  return (
+    <Marker
+      identifier={c.id}
+      coordinate={{ latitude: c.lat, longitude: c.lng }}
+      onPress={() => onPress(c.stop!)}
+      tracksViewChanges={tracking} // <-- Tracks until loaded
+      anchor={{ x: 0.5, y: 1 }}
+    >
+      <View style={s.pin}>
+        <Image
+          source={require("@/assets/images/matatu.png")}
+          style={s.icon}
+          resizeMode="contain"
+          onLoad={() => setTracking(false)} // <-- Stops tracking once the image appears
+        />
+      </View>
+    </Marker>
+  );
+}
+
+function SelectedStopMarker({ stop, onPress }: { stop: Stop; onPress: (stop: Stop) => void }) {
+  const [tracking, setTracking] = React.useState(true);
+  
+  return (
+    <Marker
+      identifier={stop.id}
+      coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+      onPress={() => onPress(stop)}
+      tracksViewChanges={tracking}
+      anchor={{ x: 0.5, y: 1 }}
+      zIndex={99}
+    >
+      <View style={s.pin}>
+        <Image
+          source={require("@/assets/images/matatu.png")}
+          style={s.iconSelected}
+          resizeMode="contain"
+          onLoad={() => setTracking(false)} 
+        />
+      </View>
+    </Marker>
+  );
+}
+
 export default function StopsLayer({
   allStops,
   viewCenter,
@@ -143,32 +190,14 @@ export default function StopsLayer({
       {clusters.map((c) =>
         c.count === 1 && c.stop ? (
           // ── Individual stop ──────────────────────────────────────────────
-          <Marker
-            key={c.id}
-            identifier={c.id}
-            coordinate={{ latitude: c.lat, longitude: c.lng }}
-            onPress={() => onPress(c.stop!)}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={s.pin}>
-              <Image
-                source={require("@/assets/images/matatu.png")}
-                style={s.icon}
-                resizeMode="contain"
-              />
-            </View>
-          </Marker>
+          <IndividualStopMarker key={c.id} c={c} onPress={onPress} />
         ) : (
           // ── Cluster bubble ───────────────────────────────────────────────
           <Marker
             key={c.id}
             coordinate={{ latitude: c.lat, longitude: c.lng }}
-            tracksViewChanges={false}
+            tracksViewChanges={false} // Text doesn't need to wait, this is fine
             anchor={{ x: 0.5, y: 0.5 }}
-            onPress={() => {
-              // Pressing a cluster does nothing (user zooms in naturally)
-            }}
           >
             <ClusterBubble count={c.count} />
           </Marker>
@@ -177,23 +206,11 @@ export default function StopsLayer({
 
       {/* Selected stop, always on top, larger icon */}
       {selectedStop && (
-        <Marker
-          key={`${selectedStop.id}-selected`}
-          identifier={selectedStop.id}
-          coordinate={{ latitude: selectedStop.lat, longitude: selectedStop.lng }}
-          onPress={() => onPress(selectedStop)}
-          tracksViewChanges={false}
-          anchor={{ x: 0.5, y: 1 }}
-          zIndex={99}
-        >
-          <View style={s.pin}>
-            <Image
-              source={require("@/assets/images/matatu.png")}
-              style={s.iconSelected}
-              resizeMode="contain"
-            />
-          </View>
-        </Marker>
+        <SelectedStopMarker 
+          key={`${selectedStop.id}-selected`} 
+          stop={selectedStop} 
+          onPress={onPress} 
+        />
       )}
     </>
   );

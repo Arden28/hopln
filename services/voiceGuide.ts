@@ -1,14 +1,14 @@
 // services/voiceGuide.ts
 // Thin wrapper around expo-speech for navigation announcements.
 // Callers decide WHEN to speak; this module decides HOW.
-import { Audio } from "expo-av";
+import { setAudioModeAsync } from "expo-audio";
 import * as Speech from "expo-speech";
 import type { ApproachPhase, NavStep } from "./navigationEngine";
 
 type NavHints = "off" | "concise" | "detailed";
 
 // On iOS, AVSpeechSynthesizer respects the ringer/silent switch by default.
-// Setting playsInSilentModeIOS overrides this so navigation voice works even
+// Setting playsInSilentMode overrides this so navigation voice works even
 // when the phone is on silent. We configure it once and cache the result.
 let _audioConfigured = false;
 let _audioPromise: Promise<void> | null = null;
@@ -16,12 +16,15 @@ let _audioPromise: Promise<void> | null = null;
 function prepareAudio(): Promise<void> {
   if (_audioConfigured) return Promise.resolve();
   if (!_audioPromise) {
-    _audioPromise = Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      allowsRecordingIOS:   false,
+    _audioPromise = setAudioModeAsync({
+      playsInSilentMode: true,
+      allowsRecording: false,
     })
       .then(() => { _audioConfigured = true; })
-      .catch(() => { _audioPromise = null; }); // allow retry on next call
+      .catch((error) => {
+        console.warn("Failed to set audio mode for TTS:", error);
+        _audioPromise = null; 
+      }); // allow retry on next call
   }
   return _audioPromise ?? Promise.resolve();
 }

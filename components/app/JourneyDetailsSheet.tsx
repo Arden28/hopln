@@ -208,7 +208,7 @@ export default function JourneyDetailsSheet({
             onPress={() => onToggleNav(!navigating)}
           >
             <Ionicons name={navigating ? "stop-circle-outline" : "navigate"} size={17} color="#fff" />
-            <Text style={s.startBtnText}>{navigating ? "End Navigation" : "Start"}</Text>
+            <Text style={s.startBtnText}>{navigating ? "End" : "Start"}</Text>
           </Pressable>
 
           <Pressable

@@ -206,6 +206,59 @@ export default function MapFloatingUI({
         {topContent}
       </View>
 
+      {/* Top Right Floating Stack */}
+      {navigating && (
+        <View style={[s.topRightStack, { top: (insets.top || 44) + 86 }]}>
+          <Pressable onPress={onOpenKwame} style={[s.navBtn, { backgroundColor: cardBg }]}>
+            <Ionicons name="sparkles" size={22} color={ORANGE} />
+          </Pressable>
+        
+
+          {/* Report Button */}
+          <Pressable
+            onPress={onOpenReport}
+            style={[
+              s.navBtn,
+              { backgroundColor: cardBg },
+              dark && {
+                borderTopColor:    "rgba(255,255,255,0.08)",
+                borderBottomColor: "rgba(0,0,0,0.30)",
+                borderLeftColor:   "rgba(0,0,0,0.12)",
+                borderRightColor:  "rgba(0,0,0,0.12)",
+              },
+            ]}
+          >
+            <Ionicons name="megaphone-outline" size={22} color={ORANGE} />
+          </Pressable>
+
+          {/* Recenter/Compass */}
+          <Pressable
+            onPress={handleNavBtn}
+            style={[
+              s.navBtn,
+              { backgroundColor: cameraUnlocked ? BLUE : cardBg },
+              dark && !cameraUnlocked && {
+                borderTopColor:    "rgba(255,255,255,0.08)",
+                borderBottomColor: "rgba(0,0,0,0.30)",
+                borderLeftColor:   "rgba(0,0,0,0.12)",
+                borderRightColor:  "rgba(0,0,0,0.12)",
+              },
+            ]}
+          >
+            <Ionicons
+              name={cameraUnlocked ? "locate" : navigating ? "compass" : "navigate"}
+              size={22}
+              color={cameraUnlocked ? WHITE : navigating ? BLUE : ORANGE}
+            />
+          </Pressable>
+          
+          {/* Dot indicator: camera is unlocked from user position */}
+          {/* {cameraUnlocked && (
+            <View style={s.unlockedDot} />
+          )} */}
+      </View>
+      )}
+
       <View style={[s.stack, { bottom: (insets.bottom || 0) + 36 + bottomOffset }]}>
         {gpsLost && navigating && (
           <View style={s.gpsLostPill}>
@@ -219,11 +272,11 @@ export default function MapFloatingUI({
             <Text style={s.speedUnit}>km/h</Text>
           </View>
         )}
-        <View>
-
-          {/* Report Button */}
-          <Pressable
-            onPress={onOpenReport}
+        {!navigating && (
+          <View>
+            {/* Report Button */}
+            <Pressable
+              onPress={onOpenReport}
             style={[
               s.navBtn,
               { backgroundColor: cardBg },
@@ -263,6 +316,7 @@ export default function MapFloatingUI({
             <View style={s.unlockedDot} />
           )}
         </View>
+        )}
       </View>
     </>
   );
@@ -282,6 +336,15 @@ const s = StyleSheet.create({
     top: 0, left: 0, right: 0,
     paddingHorizontal: 16,
     zIndex:          10,
+  },
+  
+  topRightStack: { 
+    // marginTop: 15,
+    position: "absolute", 
+    right: 16, 
+    zIndex: 15, 
+    gap: 4 
+
   },
 
   searchBar: {

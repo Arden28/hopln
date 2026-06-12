@@ -215,6 +215,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
       lat:   journey.from_lat,
       lng:   journey.from_lng,
     };
+    
     const toLoc: UnifiedLocation = {
       _type: journey.to_type,
       id:    journey.to_id ?? journey.to_name,
@@ -222,6 +223,7 @@ export default function FavoriteScreen({ onClose }: { onClose?: () => void }) {
       lat:   journey.to_lat,
       lng:   journey.to_lng,
     };
+
     setJourney(fromLoc, toLoc, journey.route);
     onClose?.();
   };
