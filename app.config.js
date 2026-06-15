@@ -73,8 +73,8 @@ module.exports = {
       },
       adaptiveIcon: {
         backgroundColor: "#E6F4FE", 
-        foregroundImage: "./assets/images/android-icon-foreground.png",
-        monochromeImage: "./assets/images/android-icon-monochrome.png",
+        foregroundImage: "./assets/images/navigo.png",
+        monochromeImage: "./assets/images/navigo-monochrome.png",
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,

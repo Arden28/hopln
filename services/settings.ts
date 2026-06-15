@@ -16,8 +16,9 @@ export interface UserSettings {
     app_news:         boolean;
   };
   privacy: {
-    two_fa:    boolean;
-    analytics: boolean;
+    two_fa:             boolean;
+    analytics:          boolean;
+    anonymous_reports:  boolean;
   };
 }
 

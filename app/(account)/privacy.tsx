@@ -140,8 +140,9 @@ export default function Privacy() {
   const hasPassword = !user?.oauth_provider;
 
   // Server-persisted settings
-  const [twoFA,     setTwoFA]     = useState(false);
-  const [analytics, setAnalytics] = useState(true);
+  const [twoFA,            setTwoFA]            = useState(false);
+  const [analytics,        setAnalytics]        = useState(true);
+  const [anonymousReports, setAnonymousReports] = useState(false);
 
   // Device-local settings (AsyncStorage)
   const [screenLock, setScreenLock] = useState(false);
@@ -154,6 +155,7 @@ export default function Privacy() {
       .then((s) => {
         setTwoFA(s.privacy.two_fa);
         setAnalytics(s.privacy.analytics);
+        setAnonymousReports(s.privacy.anonymous_reports ?? false);
       })
       .catch(() => {});
 
@@ -339,6 +341,18 @@ export default function Privacy() {
             onChange={(v) => {
               setAnalytics(v);
               savePrivacy("analytics", v, () => setAnalytics(!v));
+            }}
+          />
+          <Divider C={C} />
+          <ToggleRow
+            C={C}
+            icon="eye-off-outline"
+            label="Anonymous incident reports"
+            description="Hide your name and level from reports you submit. Your contributions are still tracked."
+            value={anonymousReports}
+            onChange={(v) => {
+              setAnonymousReports(v);
+              savePrivacy("anonymous_reports" as any, v, () => setAnonymousReports(!v));
             }}
           />
         </Section>

@@ -30,8 +30,11 @@ export function SocialButtons({ onSuccess, onNeedsPhone, onError, disabled }: Pr
   const [appleLoading, setAppleLoading] = useState(false);
 
   const [, response, promptAsync] = Google.useAuthRequest({
-    clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? "",
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS ?? "",
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID ?? "",
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? "",
     scopes: ["openid", "profile", "email"],
+    extraParams: { prompt: "select_account" },
   });
 
   useEffect(() => {
@@ -65,8 +68,8 @@ export function SocialButtons({ onSuccess, onNeedsPhone, onError, disabled }: Pr
   };
 
   const handleGoogle = async () => {
-    if (!process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID) {
-      onError("Google sign-in is not configured. Add EXPO_PUBLIC_GOOGLE_CLIENT_ID to your .env.");
+    if (!process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS && !process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID) {
+      onError("Google sign-in is not configured.");
       return;
     }
     setGoogleLoading(true);

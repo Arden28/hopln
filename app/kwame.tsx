@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet, View, TextInput, TouchableOpacity, ScrollView,
   SafeAreaView, Animated, ActivityIndicator, KeyboardAvoidingView,
-  Platform, useColorScheme, Alert
+  Platform, useColorScheme, Alert, Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -21,6 +21,51 @@ import VoiceOverlay from '../components/kwame/VoiceOverlay';
 import MessageBubble from '../components/kwame/MessageBubble';
 
 const ORANGE = "#FF6F00";
+
+function RouteScroller({ routes, C }: { routes: any[]; C: any }) {
+  const scrollRef = useRef<ScrollView>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const isLast = activeIndex >= routes.length - 1;
+
+  const scrollToNext = () => {
+    const next = Math.min(activeIndex + 1, routes.length - 1);
+    scrollRef.current?.scrollTo({ x: next * CARD_WIDTH, animated: true });
+  };
+
+  return (
+    <>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={routeScrollerStyles.row}
+        onScroll={(e) => setActiveIndex(Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH))}
+        scrollEventThrottle={16}
+      >
+        {routes.map((route, i) => <RouteCard key={i} route={route} index={i} C={C} />)}
+      </ScrollView>
+      {routes.length > 1 && !isLast && (
+        <View style={routeScrollerStyles.hintContainer}>
+          <TouchableOpacity
+            style={[routeScrollerStyles.hintCircle, { backgroundColor: C.card, borderColor: C.border }]}
+            onPress={scrollToNext}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chevron-forward" size={16} color={ORANGE} />
+          </TouchableOpacity>
+        </View>
+      )}
+    </>
+  );
+}
+
+const CARD_WIDTH = Dimensions.get('window').width - 28;
+
+const routeScrollerStyles = StyleSheet.create({
+  row: { paddingRight: 12, alignItems: 'stretch' },
+  hintContainer: { alignItems: 'center', marginTop: 8 },
+  hintCircle: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 2 },
+});
 
 const RECORDING_OPTIONS_WAV = {
   isMeteringEnabled: true,
@@ -302,7 +347,9 @@ export default function KwameScreen() {
                 
                 <MessageBubble msg={msg} C={C} isStreaming={msg.id === streamingMessageId} />
                 <ActionUI msg={msg} C={C} router={router} onSelectPlace={handleSelectSavedPlace} />
-                {msg.routes && msg.routes.map((route, i) => <RouteCard key={i} route={route} index={i} C={C} />)}
+                {msg.routes && msg.routes.length > 0 && (
+                  <RouteScroller routes={msg.routes} C={C} />
+                )}
 
                 {msg.role === 'assistant' && (
                   <View style={styles.bubbleUtilityRow}>
@@ -406,6 +453,7 @@ const styles = StyleSheet.create({
   bubbleWrapper: { marginBottom: 16, width: '100%', flexDirection: 'column' },
   userWrapper: { alignItems: 'flex-end' },
   aiWrapper: { alignItems: 'flex-start' },
+
   bubbleUtilityRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginLeft: 8, gap: 16 },
   utilityIcon: { padding: 2 },
   loaderBubble: { paddingHorizontal: 24, paddingVertical: 14, borderTopLeftRadius: 4, borderTopRightRadius: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 16, justifyContent: 'center', alignItems: 'center' },

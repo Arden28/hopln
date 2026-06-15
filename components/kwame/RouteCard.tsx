@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform, Share } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform, Share, Dimensions } from 'react-native';
+
+const CARD_WIDTH = Dimensions.get('window').width - 28; // matches scrollContent paddingHorizontal: 14
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { mapboxJourneyThumb, TransitLeg } from '../../services/ai';
@@ -217,55 +219,57 @@ export default function RouteCard({ route, index, C }: Props) {
 
   return (
     <View key={`route-${index}`} style={[styles.routeCard, { backgroundColor: C.card, borderColor: C.border }]}>
-      
-      {/* Route Header Info */}
-      <View style={[styles.routeHeader, { borderBottomColor: C.border }]}>
-        <View style={styles.headerTitleContainer}>
-          <Ionicons name="navigate-circle-outline" size={20} color={ORANGE} style={{ marginRight: 6 }} />
-          {renderMarkdownText(route.summary || "Suggested Travel Plan", [styles.routeHeadline, { color: C.text }], C.text)}
-        </View>
-        <View style={styles.headerBadges}>
-          {totalDistanceStr ? (
-            <View style={[styles.badge, { backgroundColor: C.border, marginRight: 6 }]}>
-              <Text style={styles.badgeText}>{totalDistanceStr}</Text>
+
+      <View style={styles.cardContent}>
+        {/* Route Header Info */}
+        <View style={[styles.routeHeader, { borderBottomColor: C.border }]}>
+          <View style={styles.headerTitleContainer}>
+            <Ionicons name="navigate-circle-outline" size={20} color={ORANGE} style={{ marginRight: 6 }} />
+            {renderMarkdownText(route.summary || "Suggested Travel Plan", [styles.routeHeadline, { color: C.text }], C.text)}
+          </View>
+          <View style={styles.headerBadges}>
+            {totalDistanceStr ? (
+              <View style={[styles.badge, { backgroundColor: C.border, marginRight: 6 }]}>
+                <Text style={styles.badgeText}>{totalDistanceStr}</Text>
+              </View>
+            ) : null}
+            <View style={[styles.badge, { backgroundColor: C.border }]}>
+              <Ionicons name="time-outline" size={13} color={ORANGE} style={{ marginRight: 4 }} />
+              <Text style={[styles.badgeText, { color: ORANGE }]}>{Math.round(route.total_duration / 60)} min</Text>
             </View>
-          ) : null}
-          <View style={[styles.badge, { backgroundColor: C.border }]}>
-            <Ionicons name="time-outline" size={13} color={ORANGE} style={{ marginRight: 4 }} />
-            <Text style={[styles.badgeText, { color: ORANGE }]}>{Math.round(route.total_duration / 60)} min</Text>
           </View>
         </View>
-      </View>
 
-      {/* Mapbox Journey Snapshot */}
-      {mapUrl && (
-        <View style={[styles.mapContainer, { borderColor: C.border }]}>
-          <Image source={{ uri: mapUrl }} style={styles.mapboxThumbnail} resizeMode="cover" />
-        </View>
-      )}
+        {/* Mapbox Journey Snapshot */}
+        {mapUrl && (
+          <View style={[styles.mapContainer, { borderColor: C.border }]}>
+            <Image source={{ uri: mapUrl }} style={styles.mapboxThumbnail} resizeMode="cover" />
+          </View>
+        )}
 
-      {/* Dynamic Route Steps Timeline */}
-      <View style={styles.timelineContainer}>
-        {legs.map((leg: TransitLeg, legIndex: number) => {
-          const isWalk = leg.mode?.toUpperCase() === 'WALK';
-          return (
-            <View key={legIndex} style={styles.legRow}>
-              <View style={styles.indicatorContainer}>
-                <View style={[styles.iconNodeFrame, { backgroundColor: isWalk ? C.iconBg : `${ORANGE}20` }]}>
-                  <Ionicons name={isWalk ? "walk-outline" : "bus-outline"} size={14} color={isWalk ? C.sub : ORANGE} />
+        {/* Dynamic Route Steps Timeline */}
+        <View style={styles.timelineContainer}>
+          {legs.map((leg: TransitLeg, legIndex: number) => {
+            const isWalk = leg.mode?.toUpperCase() === 'WALK';
+            return (
+              <View key={legIndex} style={styles.legRow}>
+                <View style={styles.indicatorContainer}>
+                  <View style={[styles.iconNodeFrame, { backgroundColor: isWalk ? C.iconBg : `${ORANGE}20` }]}>
+                    <Ionicons name={isWalk ? "walk-outline" : "bus-outline"} size={14} color={isWalk ? C.sub : ORANGE} />
+                  </View>
+                  {legIndex < legs.length - 1 && <View style={[styles.indicatorLine, { backgroundColor: C.border }]} />}
                 </View>
-                {legIndex < legs.length - 1 && <View style={[styles.indicatorLine, { backgroundColor: C.border }]} />}
+                <View style={styles.legContent}>
+                  {renderMarkdownText(isWalk ? 'Walk to stage' : `Board Matatu ${leg.routeNumber || 'Transit'}`, [styles.legTitle, { color: C.text }], C.text)}
+                  <Text style={[styles.legSubtext, { color: C.sub }]}>
+                    From <Text style={[styles.locationHighlight, { color: C.text }]}>{leg.from?.name}</Text>
+                    {"\n"}to <Text style={[styles.locationHighlight, { color: C.text }]}>{leg.to?.name}</Text>
+                  </Text>
+                </View>
               </View>
-              <View style={styles.legContent}>
-                {renderMarkdownText(isWalk ? 'Walk to stage' : `Board Matatu ${leg.routeNumber || 'Transit'}`, [styles.legTitle, { color: C.text }], C.text)}
-                <Text style={[styles.legSubtext, { color: C.sub }]}>
-                  From <Text style={[styles.locationHighlight, { color: C.text }]}>{leg.from?.name}</Text>
-                  {"\n"}to <Text style={[styles.locationHighlight, { color: C.text }]}>{leg.to?.name}</Text>
-                </Text>
-              </View>
-            </View>
-          );
-        })}
+            );
+          })}
+        </View>
       </View>
 
       <RouteActions route={route} C={C} startLeg={startLeg} endLeg={endLeg} />
@@ -275,7 +279,8 @@ export default function RouteCard({ route, index, C }: Props) {
 }
 
 const styles = StyleSheet.create({
-  routeCard: { borderRadius: 16, padding: 16, marginTop: 12, borderWidth: 1, width: '100%', shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
+  routeCard: { borderRadius: 16, padding: 16, marginTop: 4, marginRight: 12, borderWidth: 1, width: CARD_WIDTH, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1, flexDirection: 'column' },
+  cardContent: { flex: 1 },
   routeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: 10 },
   headerTitleContainer: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
   routeHeadline: { fontSize: 15, fontWeight: '700', lineHeight: 20, flex: 1 },

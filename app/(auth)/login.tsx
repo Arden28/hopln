@@ -37,17 +37,19 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await AuthService.login(email, password);
-      if ("needs_phone_verification" in res) {
-        router.push({ pathname: "/(auth)/verify-phone", params: { phone: res.phone } });
-        return;
-      }
+      // [PHONE VERIFICATION DISABLED] — restore block below to re-enable
+      // if ("needs_phone_verification" in res) {
+      //   router.push({ pathname: "/(auth)/verify-phone", params: { phone: res.phone } });
+      //   return;
+      // }
       await setAuth(res.user, res.token);
       router.replace("/(tabs)/map");
     } catch (e: any) {
-      if (e.status === 403 && e.data?.needs_phone_verification) {
-        router.push({ pathname: "/(auth)/verify-phone", params: { phone: e.data.phone } });
-        return;
-      }
+      // [PHONE VERIFICATION DISABLED] — restore block below to re-enable
+      // if (e.status === 403 && e.data?.needs_phone_verification) {
+      //   router.push({ pathname: "/(auth)/verify-phone", params: { phone: e.data.phone } });
+      //   return;
+      // }
       setError(e.message || "Wrong email or password.");
     } finally {
       setLoading(false);

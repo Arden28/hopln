@@ -1,8 +1,8 @@
 // components/app/MapFloatingUI.tsx
-import { Step, mToNice, stepIcon } from "@/utils/mapHelpers";
+import { Step, detectManeuver, maneuverIcon, mToNice, stepIcon } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
-import React, { JSX, useRef } from "react";
-import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
+import React, { JSX, useEffect, useRef } from "react";
+import { Animated, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
@@ -18,6 +18,7 @@ interface MapFloatingUIProps {
   onOpenSearch:       () => void;
   onOpenKwame:        () => void;
   onOpenReport:       () => void;
+  onOpenLayers:       () => void;
   navigating:         boolean;
   followMe:           boolean;
   waitingForBus:      boolean;
@@ -37,6 +38,14 @@ interface MapFloatingUIProps {
   gpsLost?:           boolean;
   currentSpeedKph?:   number;
   wrongDirection?:    boolean;
+  nextNextPreview?:   string | null;
+  approachPhase?:     string | null;
+  cameraHeading?:     number;
+  onResetNorth:       () => void;
+  // Walking-specific nav enhancements
+  stepEta?:           Date | null;
+  walkInstruction?:   string | null;
+  walkDestination?:   string | null;
 }
 
 function formatEta(date: Date): string {
@@ -60,10 +69,24 @@ export default function MapFloatingUI({
   eta, remainingDistanceM, distanceToNextStepM, navStatus, stopsRemaining,
   arrivalSoonShown, activeJourney, onClearJourney,
   bottomOffset = 0, gpsLost = false, currentSpeedKph, wrongDirection = false,
-  onOpenReport,
+  onOpenReport, onOpenLayers,
+  nextNextPreview, approachPhase, cameraHeading, onResetNorth,
+  stepEta, walkInstruction, walkDestination,
 }: MapFloatingUIProps): JSX.Element {
   const insets    = useSafeAreaInsets();
   const lastTap   = useRef(0);
+
+  // Pulse navIconBox when imminent turn is approaching
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (approachPhase !== "imminent") { pulseAnim.setValue(1); return; }
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulseAnim, { toValue: 1.18, duration: 380, useNativeDriver: true }),
+      Animated.timing(pulseAnim, { toValue: 1.0,  duration: 380, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [approachPhase, pulseAnim]);
   const dark      = useColorScheme() === "dark";
   const cardBg    = dark ? "#1C1C1E" : WHITE;
   const textColor = dark ? "#FFFFFF" : BLACK;
@@ -139,17 +162,36 @@ export default function MapFloatingUI({
         </View>
       </View>
     );
-  } else if (navigating && instructionText) {
+  } else if (navigating && (walkInstruction || instructionText)) {
+    // Walking with sub-step instructions: show turn-by-turn text and distance to
+    // boarding stop as sub-text. Transit legs keep the existing layout unchanged.
+    const isWalkSub     = !!walkInstruction;
+    const mainText      = isWalkSub ? walkInstruction! : instructionText!;
+    const iconName      = isWalkSub
+      ? maneuverIcon(detectManeuver(walkInstruction!))
+      : (nextStep ? stepIcon(nextStep.type) : "navigate");
+    const walkSubText   = isWalkSub && distanceToNextStepM != null && distanceToNextStepM > 40
+      ? `${navDist(distanceToNextStepM)}${walkDestination ? " to " + walkDestination : ""}`
+      : isWalkSub ? (walkDestination ?? null)
+      : subText;
+    const displayEta    = isWalkSub && stepEta ? stepEta : eta;
+
     topContent = (
       <View style={s.navBanner}>
-        <View style={s.navIconBox}>
-          <Ionicons name={nextStep ? stepIcon(nextStep.type) : "navigate"} size={20} color={WHITE} />
-        </View>
+        <Animated.View style={[s.navIconBox, { transform: [{ scale: pulseAnim }] }]}>
+          <Ionicons name={iconName} size={20} color={WHITE} />
+        </Animated.View>
         <View style={{ flex: 1 }}>
-          <Text style={s.navInstruction} numberOfLines={1}>{instructionText}</Text>
-          {subText && <Text style={s.navSub}>{subText}</Text>}
+          <Text style={s.navInstruction} numberOfLines={2}>{mainText}</Text>
+          {walkSubText && <Text style={s.navSub} numberOfLines={1}>{walkSubText}</Text>}
+          {nextNextPreview && (
+            <View style={s.thenChip}>
+              <Ionicons name="return-down-forward" size={11} color="rgba(255,255,255,0.70)" />
+              <Text style={s.thenText} numberOfLines={1}>then {nextNextPreview}</Text>
+            </View>
+          )}
         </View>
-        {eta && <Text style={s.navEta}>{formatEta(eta)}</Text>}
+        {displayEta && <Text style={s.navEta}>{formatEta(displayEta)}</Text>}
       </View>
     );
   } else if (waitingForBus && activeJourney) {
@@ -274,9 +316,40 @@ export default function MapFloatingUI({
         )}
         {!navigating && (
           <View>
+            {/* Compass / north-reset — only when map has rotated */}
+            {Math.abs(cameraHeading ?? 0) > 5 && (
+              <Pressable
+                onPress={onResetNorth}
+                style={[s.navBtn, { backgroundColor: cardBg }]}
+              >
+                <Ionicons name="compass-outline" size={22} color={ORANGE} />
+              </Pressable>
+            )}
+
+            {/* Layers Button */}
+            <Pressable
+              onPress={onOpenLayers}
+              accessibilityRole="button"
+              accessibilityLabel="Map layers"
+              style={[
+                s.navBtn,
+                { backgroundColor: cardBg },
+                dark && {
+                  borderTopColor:    "rgba(255,255,255,0.08)",
+                  borderBottomColor: "rgba(0,0,0,0.30)",
+                  borderLeftColor:   "rgba(0,0,0,0.12)",
+                  borderRightColor:  "rgba(0,0,0,0.12)",
+                },
+              ]}
+            >
+              <Ionicons name="layers-outline" size={22} color={ORANGE} />
+            </Pressable>
+
             {/* Report Button */}
             <Pressable
               onPress={onOpenReport}
+              accessibilityRole="button"
+              accessibilityLabel="Report an incident"
             style={[
               s.navBtn,
               { backgroundColor: cardBg },
@@ -541,4 +614,6 @@ const s = StyleSheet.create({
   },
   speedVal:  { fontSize: 15, fontWeight: "700" },
   speedUnit: { fontSize: 10, color: GREY, fontWeight: "500", marginTop: -1 },
+  thenChip:  { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  thenText:  { fontSize: 11, color: "rgba(255,255,255,0.70)", fontWeight: "500" },
 });

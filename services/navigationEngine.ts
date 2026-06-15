@@ -44,6 +44,8 @@ export interface EngineResult {
   routeBearing:       number;
   /** Perpendicular distance from user to the nearest route segment (m). */
   distanceFromRouteM: number;
+  /** The nearest point on the route polyline to the user's GPS position [lng, lat]. */
+  projectedPoint: { latitude: number; longitude: number };
   /** Stops ahead on the current transit leg. Null when on a walk leg. */
   stopsRemaining:     number | null;
   /** Name of the stop the user most recently passed. Null when on a walk leg. */
@@ -228,23 +230,25 @@ export class NavigationEngine {
   private projectUser(
     pt: [number, number],
     lastConfirmedOffset: number,
-  ): { offset: number; distFromRouteM: number; segIdx: number } {
+  ): { offset: number; distFromRouteM: number; segIdx: number; projPoint: [number, number] } {
     const searchStart = Math.max(0, lastConfirmedOffset - SEARCH_BACK_M);
     const searchEnd   = lastConfirmedOffset + SEARCH_AHEAD_M;
 
     let bestDistM  = Infinity;
     let bestOffset = lastConfirmedOffset;
     let bestSeg    = 0;
+    let bestPoint: [number, number] = [pt[0], pt[1]];
 
     for (let i = 0; i < this.coords.length - 1; i++) {
       if (this.cumDist[i + 1] < searchStart) continue;
       if (this.cumDist[i] > searchEnd) break;
 
-      const { t, distM } = projectOntoSegment(pt, this.coords[i], this.coords[i + 1]);
+      const { t, point, distM } = projectOntoSegment(pt, this.coords[i], this.coords[i + 1]);
       if (distM < bestDistM) {
         bestDistM  = distM;
         bestOffset = this.cumDist[i] + t * this.segLen[i];
         bestSeg    = i;
+        bestPoint  = point;
       }
     }
 
@@ -252,16 +256,17 @@ export class NavigationEngine {
     if (bestDistM > 100) {
       bestDistM = Infinity;
       for (let i = 0; i < this.coords.length - 1; i++) {
-        const { t, distM } = projectOntoSegment(pt, this.coords[i], this.coords[i + 1]);
+        const { t, point, distM } = projectOntoSegment(pt, this.coords[i], this.coords[i + 1]);
         if (distM < bestDistM) {
           bestDistM  = distM;
           bestOffset = this.cumDist[i] + t * this.segLen[i];
           bestSeg    = i;
+          bestPoint  = point;
         }
       }
     }
 
-    return { offset: bestOffset, distFromRouteM: bestDistM, segIdx: bestSeg };
+    return { offset: bestOffset, distFromRouteM: bestDistM, segIdx: bestSeg, projPoint: bestPoint };
   }
 
   /**
@@ -365,7 +370,7 @@ export class NavigationEngine {
     const pt: [number, number] = [lng, lat];
 
     // ── 1. Project user onto polyline ──────────────────────────────────────
-    const { offset, distFromRouteM, segIdx } = this.projectUser(pt, this.highWaterMark);
+    const { offset, distFromRouteM, segIdx, projPoint } = this.projectUser(pt, this.highWaterMark);
 
     // Monotonically advance the high water mark to prevent backward snap
     const confirmedOffset = Math.max(offset, this.highWaterMark);
@@ -442,6 +447,7 @@ export class NavigationEngine {
       approachPhase,
       routeBearing,
       distanceFromRouteM: distFromRouteM,
+      projectedPoint: { latitude: projPoint[1], longitude: projPoint[0] },
       stopsRemaining,
       currentStopName,
       currentSegmentMode,

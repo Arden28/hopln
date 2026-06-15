@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,6 +15,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SocialButtons } from "@/components/auth/SocialButtons";
+import {
+  EAST_AFRICA,
+  type Country,
+  buildFullPhone,
+  CountryPickerModal,
+} from "@/components/auth/CountryPicker";
 import { AuthService } from "@/services/auth";
 import { useAuthStore, type AuthUser } from "@/store/authStore";
 
@@ -26,9 +32,13 @@ export default function Register() {
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("+254");
+  const [selectedCountry, setSelectedCountry] = useState<Country>(EAST_AFRICA[0]);
+  const [phoneInput, setPhoneInput] = useState("");
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+
+  const phoneRef = useRef<TextInput>(null);
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -45,9 +55,12 @@ export default function Register() {
         email,
         password,
         password_confirmation: confirm,
-        phone_number: phone,
+        phone_number: buildFullPhone(selectedCountry, phoneInput),
       });
-      router.push({ pathname: "/(auth)/verify-phone", params: { phone: res.phone } });
+      // [PHONE VERIFICATION DISABLED] — restore line below and remove setAuth/replace when re-enabling
+      // router.push({ pathname: "/(auth)/verify-phone", params: { phone: res.phone } });
+      await setAuth(res.user, res.token);
+      router.replace("/(tabs)/map");
     } catch (e: any) {
       setError(e.message || "Registration failed.");
     } finally {
@@ -127,14 +140,29 @@ export default function Register() {
             autoCapitalize="none"
             C={C}
           />
-          <Field
-            label="Phone number"
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="+254712345678"
-            keyboardType="phone-pad"
-            C={C}
-          />
+          <View style={styles.fieldWrap}>
+            <Text style={[styles.label, { color: C.textSub }]}>Phone number</Text>
+            <View style={[styles.phoneRow, { backgroundColor: C.inputBg, borderColor: C.inputBd }]}>
+              <Pressable
+                style={[styles.countryBadge, { borderRightColor: C.inputBd }]}
+                onPress={() => setShowCountryPicker(true)}
+              >
+                <Text style={styles.flagEmoji}>{selectedCountry.flag}</Text>
+                <Text style={[styles.dialCode, { color: C.text }]}>{selectedCountry.dial}</Text>
+                <Ionicons name="chevron-down" size={12} color={C.textSub} style={{ marginLeft: 2 }} />
+              </Pressable>
+              <TextInput
+                ref={phoneRef}
+                style={[styles.phoneInput, { color: C.text }]}
+                placeholder={selectedCountry.placeholder}
+                placeholderTextColor={C.placeholder}
+                value={phoneInput}
+                onChangeText={setPhoneInput}
+                keyboardType="phone-pad"
+                maxLength={12}
+              />
+            </View>
+          </View>
 
           {/* Password */}
           <View style={styles.fieldWrap}>
@@ -189,6 +217,20 @@ export default function Register() {
           </Pressable>
         </View>
       </ScrollView>
+
+      <CountryPickerModal
+        visible={showCountryPicker}
+        selected={selectedCountry}
+        C={C}
+        bottomInset={insets.bottom}
+        onSelect={(country) => {
+          setSelectedCountry(country);
+          setPhoneInput("");
+          setShowCountryPicker(false);
+          setTimeout(() => phoneRef.current?.focus(), 200);
+        }}
+        onClose={() => setShowCountryPicker(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -260,6 +302,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 15,
   },
+  phoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    overflow: "hidden",
+  },
+  countryBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    height: "100%",
+    borderRightWidth: 1.5,
+  },
+  flagEmoji:  { fontSize: 22, lineHeight: 28 },
+  dialCode:   { fontSize: 14, fontWeight: "600" },
+  phoneInput: { flex: 1, fontSize: 15, paddingHorizontal: 14 },
   pwRow: {
     height: 52,
     flexDirection: "row",

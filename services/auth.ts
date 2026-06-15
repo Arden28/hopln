@@ -23,7 +23,7 @@ export const AuthService = {
     password: string;
     password_confirmation: string;
     phone_number: string;
-  }): Promise<NeedsPhoneResponse> {
+  }): Promise<AuthTokenResponse> {
     const res = await api.post("/auth/register", data);
     return res.data;
   },
@@ -58,6 +58,10 @@ export const AuthService = {
   ): Promise<AuthTokenResponse | NeedsPhoneSetupResponse> {
     const res = await api.post("/auth/apple", { identity_token: identityToken, user });
     return res.data;
+  },
+
+  async setPhone(phone: string, setupToken: string): Promise<void> {
+    await api.post("/auth/phone/set", { phone_number: phone, setup_token: setupToken });
   },
 
   async sendOtp(phone: string): Promise<void> {

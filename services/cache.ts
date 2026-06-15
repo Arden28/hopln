@@ -53,6 +53,7 @@ export const CACHE_KEYS = {
   USER_ME:                "user_me",
   SETTINGS_NOTIFICATIONS: "settings_notifications",
   NOTIFICATIONS_INBOX:    "notifications_inbox",
+  REPORTS_VIEWPORT:       "reports_viewport",
 } as const;
 
 export const CACHE_TTL = {
@@ -60,5 +61,6 @@ export const CACHE_TTL = {
   USER:                    5 * 60 * 1000,        // 5 min
   SETTINGS:            7 * 24 * 60 * 60 * 1000,  // 7 days, settings are user-driven
   NOTIFICATIONS_INBOX:        60 * 1000,         // 1 min, inbox needs to feel live
+  REPORTS:                10 * 60 * 1000,        // 10 min, last-seen reports for instant/offline paint
   DEFAULT:                 5 * 60 * 1000,
 } as const;

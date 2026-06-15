@@ -23,10 +23,25 @@ function prepareAudio(): Promise<void> {
       .then(() => { _audioConfigured = true; })
       .catch((error) => {
         console.warn("Failed to set audio mode for TTS:", error);
-        _audioPromise = null; 
+        _audioPromise = null;
       }); // allow retry on next call
   }
   return _audioPromise ?? Promise.resolve();
+}
+
+// Speech serialization — prevents Speech.stop() from cutting off in-flight announcements.
+// At most one announcement plays at a time; a second one waits in _pending (replacing
+// any earlier pending item so the queue never piles up).
+let _speaking = false;
+let _pending: string | null = null;
+
+function _play(text: string) {
+  _speaking = true;
+  Speech.speak(text, {
+    language: "en", rate: 1.05, pitch: 1.0,
+    onDone:  () => { _speaking = false; if (_pending) { const t = _pending; _pending = null; _play(t); } },
+    onError: () => { _speaking = false; _pending = null; },
+  });
 }
 
 function niceDistance(m: number): string {
@@ -35,27 +50,24 @@ function niceDistance(m: number): string {
 }
 
 export const VoiceGuide = {
-  /**
-   * Speak a navigation cue.
-   * Audio session is configured lazily on the first call (< 1 ms after first
-   * successful setup). stop() + speak() are called inside the resolved
-   * promise so they never race with an in-progress stop on Android TTS.
-   */
+  /** Speak a navigation cue, letting the current announcement finish first. */
   announce(text: string) {
     prepareAudio()
-      .then(() => {
-        Speech.stop();
-        Speech.speak(text, { language: "en", rate: 1.05, pitch: 1.0 });
-      })
-      .catch(() => {
-        // Audio session failed, try anyway (works on Android, newer iOS)
-        Speech.stop();
-        Speech.speak(text, { language: "en", rate: 1.05, pitch: 1.0 });
-      });
+      .then(() => { _speaking ? (_pending = text) : _play(text); })
+      .catch(() => { _speaking ? (_pending = text) : _play(text); });
+  },
+
+  /** Interrupt any in-flight speech and speak immediately (for step changes). */
+  urgentAnnounce(text: string) {
+    prepareAudio()
+      .then(() => { Speech.stop(); _pending = null; _speaking = false; _play(text); })
+      .catch(() => { Speech.stop(); _pending = null; _speaking = false; _play(text); });
   },
 
   stop() {
     Speech.stop();
+    _pending  = null;
+    _speaking = false;
   },
 
   /**

@@ -1,7 +1,9 @@
 import { AuthService } from "@/services/auth";
+import { formatBytes } from "@/services/offlineTiles";
 import { useAuthStore } from "@/store/authStore";
 import { useSavedStore } from "@/store/savedStore";
 import { usePrefsStore } from "@/store/prefsStore";
+import { useOfflineMapStore } from "@/store/offlineMapStore";
 import { useContributionStore } from "@/store/contributionStore";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -98,6 +100,7 @@ export default function Profile() {
   const { places, fetch: fetchSaved, reset: resetSaved } = useSavedStore();
   const { prefs, loaded: prefsLoaded, load: loadPrefs, set: setPref } = usePrefsStore();
   const { stats, fetch: fetchContrib, reset: resetContrib } = useContributionStore();
+  const offlinePack = useOfflineMapStore((s) => s.pack);
 
   useEffect(() => { fetchSaved().catch(() => {}); }, [fetchSaved]);
   useEffect(() => { if (!prefsLoaded) loadPrefs(); }, [prefsLoaded, loadPrefs]);
@@ -211,6 +214,12 @@ export default function Profile() {
             { label: "1.5 km", value: 1500 },
             { label: "2 km",   value: 2000 },
           ])}
+        />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row
+          C={C} icon="cloud-download-outline" label="Offline maps"
+          value={offlinePack ? formatBytes(offlinePack.bytes) : "Off"}
+          onPress={() => router.push("/(account)/offline-maps" as any)}
         />
       </View>
 

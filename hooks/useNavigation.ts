@@ -19,9 +19,10 @@ import * as Linking from "expo-linking";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 
-// EMA alpha for location smoothing, lower = more smoothing (better for bus speed)
+// EMA alpha for location smoothing. Transit was 0.12 which caused 60-100 m lag at bus speed
+// (88% weight to old position × 45 m/fix × compounding). 0.40 cuts lag to ~5 m within 5 fixes.
 const EMA_LOC_WALK    = 0.25;
-const EMA_LOC_TRANSIT = 0.12;
+const EMA_LOC_TRANSIT = 0.40;
 const EMA_SPD         = 0.35;
 const EMA_HEAD        = 0.3;
 
@@ -40,22 +41,28 @@ export function useNavigation() {
   const activeJourney = useJourneyStore((state) => state.activeJourney);
   const setTripStatus = useJourneyStore((state) => state.setTripStatus);
   const tripStatus    = useJourneyStore((state) => state.tripStatus);
+  const updateRoute   = useJourneyStore((state) => state.updateRoute); // Added to hydrate deep links
   const navHints      = usePrefsStore((s) => s.prefs.navHints);
+  const maxWalkMeters = usePrefsStore((s) => s.prefs.maxWalkMeters);
 
   // True for WAITING_FOR_BUS and IN_TRANSIT, use higher-accuracy GPS tier.
   const isNavigating = tripStatus !== "IDLE";
 
   const engineRef   = useRef<NavigationEngine | null>(null);
   const watchRef    = useRef<Location.LocationSubscription | null>(null);
+  const interpRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const meSmoothRef = useRef<Coords | null>(null);
+  // Last position actually displayed (may be route-snapped); used as interpolation origin.
+  const meSnapRef   = useRef<Coords | null>(null);
 
   // Refs so GPS watcher closures always read the latest values without re-mounting.
   const stepIndexRef         = useRef<number>(0);
   const lastAnnouncedRef     = useRef<string>("");
   const prevStepIndexRef     = useRef<number>(0);
   const lastAlightAlertRef   = useRef<number>(-1);
-  const lastAnnouncedStopRef = useRef<string | null>(null);
-  const reroutingRef         = useRef<boolean>(false);
+  const lastAnnouncedStopRef  = useRef<string | null>(null);
+  const prevApproachPhaseRef  = useRef<string | null>(null);
+  const reroutingRef          = useRef<boolean>(false);
   const lastGpsTimeRef       = useRef<number>(Date.now());
   const lastSpeedRef         = useRef<number>(0);
   const lastDeadReckonTimeRef = useRef<number>(Date.now());
@@ -80,14 +87,15 @@ export function useNavigation() {
   const [gpsLost, setGpsLost]                   = useState(false);
   const [wrongDirection, setWrongDirection]     = useState(false);
   const [backgroundPermissionGranted, setBgPermGranted] = useState(false);
+  
+  // Track deep link auto-fetching
+  const fetchingRouteRef = useRef<boolean>(false);
 
-  // Track component mount state for safe async callbacks.
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  // Keep appStateRef current so background callbacks can check foreground vs background.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       appStateRef.current = next;
@@ -95,13 +103,10 @@ export function useNavigation() {
     return () => sub.remove();
   }, []);
 
-  // Keep stepIndexRef in sync with the latest navState.
   useEffect(() => {
     stepIndexRef.current = navState?.stepIndex ?? 0;
   }, [navState?.stepIndex]);
 
-  // Session restore, runs once on mount, before engine init, to rehydrate an
-  // interrupted navigation session.
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
@@ -126,11 +131,30 @@ export function useNavigation() {
       return;
     }
 
+    // 🚀 THE FIX: If route is null (Deep Link scenario), fetch it immediately!
+    if (!activeJourney.route) {
+      if (!fetchingRouteRef.current) {
+        fetchingRouteRef.current = true;
+        RouteService.calculateJourney(activeJourney.fromLoc, activeJourney.toLoc, maxWalkMeters)
+          .then((routes) => {
+            if (routes.length > 0 && mountedRef.current) {
+              updateRoute(routes[0]); // Populates the store so this useEffect runs again cleanly
+            }
+          })
+          .catch((err) => console.error("Deep link route calc failed", err))
+          .finally(() => { fetchingRouteRef.current = false; });
+      }
+      return; // 🛑 Pause engine setup until the fetch completes
+    }
+
+    // Safely destructure segments now that we know route exists
+    const segments = activeJourney.route.segments || [];
+    if (segments.length === 0) return;
+
     const allCoords: [number, number][] = [];
     const engineSteps: any[]            = [];
 
-    activeJourney.route.segments.forEach((seg: any) => {
-      // API returns [[lat, lng], ...], engine needs [lng, lat].
+    segments.forEach((seg: any) => {
       (seg.coordinates as [number, number][]).forEach(([lat, lng]) =>
         allCoords.push([lng, lat]),
       );
@@ -150,18 +174,16 @@ export function useNavigation() {
 
     engineRef.current = new NavigationEngine(allCoords, engineSteps);
 
-    // Re-apply persisted engine state when the engine is rebuilt from a saved session.
     navSession.restore().then((session) => {
       if (session && engineRef.current) {
         engineRef.current.restore(session.highWaterMark, session.engineStrikes);
       }
     });
-  }, [activeJourney]);
+  }, [activeJourney, maxWalkMeters, updateRoute]);
 
-  // Shared handler for foreground GPS watcher and background DeviceEventEmitter.
-  // useCallback([navHints]), all other values accessed via refs to avoid stale closures.
   const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     if (!mountedRef.current) return;
+    if ((loc.coords.accuracy ?? 0) > 45) return; // reject low-quality fixes (multipath noise)
 
     const currentStepType = engineRef.current?.steps[stepIndexRef.current]?.type ?? "WALK";
     const EMA_LOC = currentStepType !== "WALK" ? EMA_LOC_TRANSIT : EMA_LOC_WALK;
@@ -176,6 +198,7 @@ export function useNavigation() {
     const p = meSmoothRef.current;
     if (!p) {
       meSmoothRef.current = next;
+      meSnapRef.current   = next;
       setLocation(next);
       return;
     }
@@ -190,6 +213,7 @@ export function useNavigation() {
 
     const smoothed = { latitude: lat, longitude: lng, heading, speed };
     meSmoothRef.current = smoothed;
+    meSnapRef.current   = smoothed; // default: raw GPS; overwritten by route-snap below if on-route
     setLocation(smoothed);
     lastGpsTimeRef.current = Date.now();
     lastSpeedRef.current   = smoothed.speed ?? 0;
@@ -202,13 +226,11 @@ export function useNavigation() {
         stepIndexRef.current,
       );
 
-      // Suppress off-route on transit legs, driver controls the path.
       const stepType = engineRef.current.steps[result.stepIndex]?.type;
       if (result.status === "off_route" && stepType && stepType !== "WALK") {
         result.status = "active";
       }
 
-      // ── Auto re-routing on walk off-route ────────────────────────────────
       if (result.status === "off_route") {
         if (!reroutingRef.current) {
           reroutingRef.current = true;
@@ -241,13 +263,15 @@ export function useNavigation() {
         result.status = "rerouting";
       }
 
-      // ── Haptics + voice on step advance ─────────────────────────────────
+      let stepJustChanged = false;
       if (result.stepIndex !== prevStepIndexRef.current) {
-        prevStepIndexRef.current = result.stepIndex;
-        lastAnnouncedRef.current = "";
+        prevStepIndexRef.current    = result.stepIndex;
+        lastAnnouncedRef.current    = "";
         lastAnnouncedStopRef.current = null;
+        prevApproachPhaseRef.current = null;
         wrongDirStrikesRef.current   = 0;
         wrongDirAnnouncedRef.current = false;
+        stepJustChanged = true;
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       }
 
@@ -260,7 +284,6 @@ export function useNavigation() {
         }
       }
 
-      // ── Voice guidance on approach phase change ──────────────────────────
       const phaseKey = VoiceGuide.phaseKey(result.stepIndex, result.approachPhase);
       if (phaseKey !== lastAnnouncedRef.current) {
         const upcomingStep = engineRef.current.steps[result.stepIndex];
@@ -272,22 +295,43 @@ export function useNavigation() {
         );
         if (text) {
           lastAnnouncedRef.current = phaseKey;
-          VoiceGuide.announce(text);
+          // Step-change instructions must interrupt any in-flight speech immediately.
+          if (stepJustChanged) VoiceGuide.urgentAnnounce(text);
+          else VoiceGuide.announce(text);
         }
+      }
+
+      // Approach haptics — distinct from the step-advance Medium haptic above.
+      // Light = "near" (100-300 m), Heavy = "imminent" (<100 m).
+      if (result.approachPhase !== prevApproachPhaseRef.current) {
+        prevApproachPhaseRef.current = result.approachPhase;
+        if (result.approachPhase === "near")
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        else if (result.approachPhase === "imminent")
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
       }
 
       stepIndexRef.current = result.stepIndex;
       setNavState(result);
       if (result.status === "arrived") useJourneyStore.getState().setTripStatus("ARRIVED");
 
-      // ── Stop name callout (transit legs, detailed hints only) ───────────
+      // Route-snap: when the user is within 45 m of the polyline, shift the displayed dot
+      // onto the road surface. Blend zone 30–45 m avoids jarring jumps on re-entry.
+      if (result.projectedPoint && result.distanceFromRouteM < 45) {
+        const blend   = Math.min(1.0, Math.max(0, (45 - result.distanceFromRouteM) / 15));
+        const snapLat = smoothed.latitude  + blend * (result.projectedPoint.latitude  - smoothed.latitude);
+        const snapLng = smoothed.longitude + blend * (result.projectedPoint.longitude - smoothed.longitude);
+        const snapPos = { ...smoothed, latitude: snapLat, longitude: snapLng };
+        meSnapRef.current = snapPos;
+        setLocation(snapPos);
+      }
+
       if (navHints === "detailed" && result.currentStopName &&
           result.currentStopName !== lastAnnouncedStopRef.current) {
         lastAnnouncedStopRef.current = result.currentStopName;
         VoiceGuide.announce(`Now passing ${result.currentStopName}.`);
       }
 
-      // ── Alight alerts (transit legs only) ───────────────────────────────
       const stopsRem = result.stopsRemaining;
       if (stopsRem != null) {
         const last = lastAlightAlertRef.current;
@@ -296,7 +340,10 @@ export function useNavigation() {
         } else if (stopsRem === 2 && last !== 2) {
           lastAlightAlertRef.current = 2;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-          if (navHints !== "off") VoiceGuide.announce("Prepare to alight in 2 stops.");
+          const alightStop2 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
+          if (navHints !== "off") VoiceGuide.announce(
+            alightStop2 ? `Prepare to alight at ${alightStop2} in 2 stops.` : "Prepare to alight in 2 stops.",
+          );
           if (appStateRef.current !== "active" && !alightWarningFiredRef.current) {
             alightWarningFiredRef.current = true;
             const step = engineRef.current?.steps[result.stepIndex];
@@ -309,15 +356,20 @@ export function useNavigation() {
         } else if (stopsRem === 1 && last !== 1) {
           lastAlightAlertRef.current = 1;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-          if (navHints !== "off") VoiceGuide.announce("Prepare to alight at the next stop.");
+          const alightStop1 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
+          if (navHints !== "off") VoiceGuide.announce(
+            alightStop1 ? `Prepare to alight at ${alightStop1}.` : "Prepare to alight at the next stop.",
+          );
         } else if (stopsRem === 0 && last !== 0) {
           lastAlightAlertRef.current = 0;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-          if (navHints !== "off") VoiceGuide.announce("Alight now.");
+          const alightStop0 = engineRef.current?.steps[result.stepIndex]?.stops?.at(-1)?.name;
+          if (navHints !== "off") VoiceGuide.announce(
+            alightStop0 ? `Alight now at ${alightStop0}.` : "Alight now.",
+          );
         }
       }
 
-      // ── Wrong direction detection (walk legs only) ──────────────────────
       const smoothedHeading = smoothed.heading ?? -1;
       const isWalkLeg  = result.currentSegmentMode === "WALK" || result.currentSegmentMode == null;
       const moving     = (smoothed.speed ?? 0) > 1.0;
@@ -351,7 +403,6 @@ export function useNavigation() {
       }
       setWrongDirection(wrongDirStrikesRef.current >= 4);
 
-      // ── Throttled session persistence (IN_TRANSIT only) ─────────────────
       const nowMs = Date.now();
       const stepChanged = result.stepIndex !== prevSavedStepRef.current;
       if (stepChanged || nowMs - lastSaveTimeRef.current > 10_000) {
@@ -373,13 +424,12 @@ export function useNavigation() {
       }
     }
 
-    // ── WAITING_FOR_BUS: auto-detect bus departure and start navigation ───
     if (useJourneyStore.getState().tripStatus === "WAITING_FOR_BUS") {
       const journey = useJourneyStore.getState().activeJourney;
       if (journey && engineRef.current) {
         const firstTransit = journey.route.segments.find((s: any) => s.mode !== "WALK");
         if (firstTransit) {
-          const d     = distM(smoothed.latitude, smoothed.longitude, firstTransit.from.lat, firstTransit.from.lng);
+          const d   = distM(smoothed.latitude, smoothed.longitude, firstTransit.from.lat, firstTransit.from.lng);
           const spd   = smoothed.speed ?? 0;
 
           if (spd > 2.2 && d > 40) {
@@ -402,11 +452,10 @@ export function useNavigation() {
     }
   }, [navHints]);
 
-  // GPS watcher, restarts when navigation mode or handleLocationUpdate changes.
   useEffect(() => {
     const gpsOptions = isNavigating
-      ? { accuracy: Location.Accuracy.Balanced, timeInterval: 3000,  distanceInterval: 5  }
-      : { accuracy: Location.Accuracy.Low,      timeInterval: 20000, distanceInterval: 50 };
+      ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 3 }
+      : { accuracy: Location.Accuracy.Low,  timeInterval: 20000, distanceInterval: 50 };
 
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -421,10 +470,34 @@ export function useNavigation() {
       });
 
       watchRef.current = await Location.watchPositionAsync(gpsOptions, handleLocationUpdate);
+
+      // Between 1 Hz GPS fixes, extrapolate the displayed position forward at 3+ Hz
+      // using current speed + heading so the dot flows smoothly instead of teleporting.
+      if (isNavigating) {
+        interpRef.current = setInterval(() => {
+          if (!mountedRef.current || !meSnapRef.current) return;
+          const sinceGps = (Date.now() - lastGpsTimeRef.current) / 1000;
+          if (sinceGps < 0.1 || sinceGps > 4.0) return; // only between GPS fixes
+          const { latitude, longitude, heading, speed } = meSnapRef.current;
+          if ((speed ?? 0) < 0.5) return;                // only when moving
+          const travelM = (speed ?? 0) * sinceGps;
+          const hRad    = ((heading ?? 0) * Math.PI) / 180;
+          const cosLat  = Math.cos(latitude * Math.PI / 180);
+          setLocation({
+            ...meSnapRef.current,
+            latitude:  latitude  + (travelM / 111_320) * Math.cos(hRad),
+            longitude: longitude + (travelM / 111_320) * Math.sin(hRad) / cosLat,
+          });
+        }, 300);
+      }
     })();
 
     return () => {
       watchRef.current?.remove();
+      if (interpRef.current !== null) {
+        clearInterval(interpRef.current);
+        interpRef.current = null;
+      }
       VoiceGuide.stop();
       setWrongDirection(false);
       wrongDirStrikesRef.current   = 0;
@@ -432,8 +505,6 @@ export function useNavigation() {
     };
   }, [isNavigating, handleLocationUpdate]);
 
-  // Dead-reckoning interval: advances the engine position when GPS goes dark
-  // during IN_TRANSIT. Also drives the GPS-lost indicator shown in the UI.
   useEffect(() => {
     if (!isNavigating) { setGpsLost(false); return; }
 
@@ -453,14 +524,12 @@ export function useNavigation() {
     return () => { clearInterval(id); setGpsLost(false); };
   }, [isNavigating]);
 
-  // Start/stop background location tracking based on navigation state and permission.
   useEffect(() => {
     if (isNavigating && backgroundPermissionGranted) startBackgroundTracking();
     else stopBackgroundTracking();
     return () => { stopBackgroundTracking(); };
   }, [isNavigating, backgroundPermissionGranted]);
 
-  // Forward background location events to the shared handler.
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener("bgLocation", (loc: Location.LocationObject) => {
       handleLocationUpdate(loc);

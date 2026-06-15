@@ -20,15 +20,16 @@ export function useMapCamera(mapRef: RefObject<MapView | null>) {
   const animateTo = useCallback(
     (opts: CameraOptions) => {
       if (!mapRef.current) return;
-      mapRef.current.animateCamera(
-        {
-          center:  opts.center,
-          zoom:    opts.zoom,
-          heading: opts.heading ?? 0,
-          pitch:   opts.pitch   ?? 0,
-        },
-        { duration: opts.duration ?? 400 },
-      );
+      // Only include `heading` when the caller explicitly provides it.
+      // Omitting it lets react-native-maps preserve the current map rotation
+      // rather than snapping to north (the ?? 0 fallback was a silent bug).
+      const cam: Parameters<typeof mapRef.current.animateCamera>[0] = {
+        center: opts.center,
+        zoom:   opts.zoom,
+        pitch:  opts.pitch ?? 0,
+      };
+      if (opts.heading !== undefined) cam.heading = opts.heading;
+      mapRef.current.animateCamera(cam, { duration: opts.duration ?? 400 });
     },
     [mapRef],
   );
