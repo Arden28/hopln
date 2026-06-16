@@ -79,6 +79,7 @@ export default function RootLayout() {
         <Stack.Screen name="journey" options={{ headerShown: false }} />
         <Stack.Screen name="(account)" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="kwame" options={{ animation: "slide_from_bottom", gestureEnabled: true }} />
+        <Stack.Screen name="kwame-settings" options={{ animation: "slide_from_right", headerShown: false }} />
         </Stack>
       </QueryClientProvider>
     </SafeAreaProvider>

@@ -1,6 +1,5 @@
 // components/app/JourneyDetailsSheet.tsx
 import { formatDist, usePrefsStore } from "@/store/prefsStore";
-import { shareJourney } from "@/utils/shareJourney";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Linking, Platform } from "react-native";
@@ -12,6 +11,7 @@ import {
   PanResponder,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -158,6 +158,22 @@ export default function JourneyDetailsSheet({
 
   const segs = activeJourney.route?.segments ?? [];
 
+  const handleShare = async () => {
+    const from = activeJourney.fromLoc;
+    const to   = activeJourney.toLoc;
+    const fName = encodeURIComponent(from?.name || "Origin");
+    const tName = encodeURIComponent(to?.name   || "Destination");
+    const url = `https://navigo.co.ke/route?fLat=${from.lat}&fLng=${from.lng}&tLat=${to.lat}&tLng=${to.lng}&fName=${fName}&tName=${tName}`;
+    try {
+      await Share.share({
+        message: `Check out this Matatu route to ${to?.name || "your destination"} on Navigo:\n\n${url}`,
+        title: "Shared Route",
+      });
+    } catch {
+      // user cancelled or share failed — no alert needed
+    }
+  };
+
   return (
     <Animated.View
       style={[s.panel, { backgroundColor: C.bg, height: SCREEN_HEIGHT - MAX_Y, transform: [{ translateY }] }]}
@@ -245,11 +261,7 @@ export default function JourneyDetailsSheet({
 
           <Pressable
             style={({ pressed }) => [s.saveBtn, { borderColor: C.border, backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}
-            onPress={() => {
-              if (activeJourney?.fromLoc && activeJourney?.toLoc) {
-                shareJourney(activeJourney.fromLoc, activeJourney.toLoc).catch(() => {});
-              }
-            }}
+            onPress={handleShare}
           >
             <Ionicons name="share-outline" size={16} color={GREY} />
             <Text style={[s.saveBtnText, { color: GREY }]}>Share</Text>

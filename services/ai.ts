@@ -65,6 +65,14 @@ export function mapboxJourneyThumb(fromLng: number, fromLat: number, toLng: numb
   );
 }
 
+export interface VoiceSettings {
+  voice_name?:     string;
+  speaking_rate?:  number;
+  pitch?:          number;
+  language_code?:  string;
+  response_style?: "casual" | "professional" | "brief";
+}
+
 export const AiService = {
   async planRoute(
     sessionId: string,
@@ -74,25 +82,26 @@ export const AiService = {
     currentLat?: number,
     currentLng?: number,
     aliases?: UserContext['aliases'],
+    voiceSettings?: VoiceSettings,
   ): Promise<AiPlanResponse> {
     const payload: Record<string, any> = { session_id: sessionId };
 
     if (text) payload.text = text.trim();
     if (audioBase64) {
-      payload.audio = { base64: audioBase64, mime: mimeType ?? 'audio/wav' };
+      payload.audio = { base64: audioBase64, mime: mimeType ?? 'audio/mp4' };
     }
-    
+
     if (currentLat != null && currentLng != null) {
       payload.lat = currentLat;
       payload.lng = currentLng;
     }
-    
+
     if (aliases && Object.keys(aliases).length > 0) payload.aliases = aliases;
+    if (voiceSettings) payload.voice_settings = voiceSettings;
 
     try {
-      // Direct Axios instance call bypassing fetchApi to cleanly inject custom timeouts
       const response = await api.post<AiPlanResponse>("/journey/ai-plan", payload, {
-        timeout: 90000, // Generous 90s window for LLM, OTP, and Audio Synthesizer
+        timeout: 90000,
       });
       return response.data;
 
@@ -100,5 +109,13 @@ export const AiService = {
       console.error("AI Routing Network Error:", error);
       throw error;
     }
-  }
+  },
+
+  async speak(text: string, voiceSettings?: VoiceSettings): Promise<{ audio: string }> {
+    const response = await api.post<{ audio: string }>("/kwame/speak", {
+      text,
+      ...(voiceSettings ? { voice_settings: voiceSettings } : {}),
+    }, { timeout: 15000 });
+    return response.data;
+  },
 };
