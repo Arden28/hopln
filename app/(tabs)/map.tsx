@@ -44,10 +44,11 @@ import { useSavedStore }  from "@/store/savedStore";
 import { usePrefsStore }  from "@/store/prefsStore";
 import { useAuthStore }   from "@/store/authStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, UrlTile } from "react-native-maps";
 import { MapService } from "@/services/map";
 
+const { width: SW, height: SH } = Dimensions.get("window");
 
 export default function MapScreen() {
   const router = useRouter();
@@ -128,6 +129,8 @@ export default function MapScreen() {
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
   const [layersOpen,      setLayersOpen]      = useState(false);
   const [followMe,        setFollowMe]        = useState(true);
+  const [headingUp,       setHeadingUp]       = useState(false);
+  const [navIndicatorPos, setNavIndicatorPos] = useState<{ x: number; y: number } | null>(null);
   const [navStarted,      setNavStarted]      = useState(false);
   const [selected,        setSelected]        = useState<Stop | null>(null);
   const [nearestOpen,     setNearestOpen]     = useState(false);
@@ -156,6 +159,11 @@ export default function MapScreen() {
   // to the dependency array (which would restart the interval on every GPS fix).
   const isVehicleModeRef = useRef(isVehicleMode);
   useEffect(() => { isVehicleModeRef.current = isVehicleMode; }, [isVehicleMode]);
+
+  // headingUp controls north-up vs heading-up camera mode. Exposed as a ref so
+  // the camera interval can read it without restarting the interval.
+  const headingUpRef = useRef(headingUp);
+  useEffect(() => { headingUpRef.current = headingUp; }, [headingUp]);
 
   // Live compass bearing (works at rest) → drives the heading beam + nav camera.
   useHeadingTracker();
@@ -246,17 +254,6 @@ export default function MapScreen() {
     camera.animateTo({ center: { latitude: meLat, longitude: meLng }, zoom: 16, heading: 0, duration: 300 });
   }, [meLat, meLng, followMe, navigating, camera]);
 
-  // ── Camera re-lock after manual pan (5 s) ────────────────────────────────────
-
-  useEffect(() => {
-    if (!navigating || followMe) {
-      if (relockRef.current) { clearTimeout(relockRef.current); relockRef.current = null; }
-      return;
-    }
-    relockRef.current = setTimeout(() => setFollowMe(true), 5000);
-    return () => { if (relockRef.current) clearTimeout(relockRef.current); };
-  }, [navigating, followMe]);
-
   // ── Navigation camera — GPS course heading blended with compass ───────────────
   // Reads GPS course from meRef (EMA-smoothed in useNavigation) and blends it
   // with the magnetometer. At walking speed compass dominates (no GPS course);
@@ -283,6 +280,15 @@ export default function MapScreen() {
     let anchorGps    = smooth;
     let anchorCmp    = useHeadingStore.getState().heading;
     let lastAnchorMs = 0;
+
+    // Immediately orient the map: north-up or heading-up, whichever is active.
+    // Without this, the camera keeps whatever heading it had from explore mode.
+    if (!headingUpRef.current) {
+      camera.animateTo({ heading: 0, duration: 400 });
+      lastSentHdgRef.current = 0;
+    } else {
+      lastSentHdgRef.current = committed;
+    }
 
     const id = setInterval(() => {
       const pos = meRef.current;
@@ -352,17 +358,32 @@ export default function MapScreen() {
 
       const pitch = prefs.navView === "tilted" ? (vehicleMode ? 60 : 45) : 0;
 
-      // Only push a heading update to the camera when the change exceeds 2°.
-      // Micro-updates (tiny compass noise) trigger overlapping 80 ms animations
-      // which produce the brief "double render" artifact on Android PROVIDER_GOOGLE.
-      const hdgDelta = Math.abs(((committed - lastSentHdgRef.current + 540) % 360) - 180);
+      // Heading: committed (heading-up) or 0 (north-up, default).
+      // Only push to camera when the change exceeds 2° to prevent micro-animation
+      // churn that produces the brief "double render" artifact on Android.
+      const targetHeading = headingUpRef.current ? committed : 0;
+      const hdgDelta = Math.abs(((targetHeading - lastSentHdgRef.current + 540) % 360) - 180);
       const sendHdg  = hdgDelta >= 2.0;
-      if (sendHdg) lastSentHdgRef.current = committed;
+      if (sendHdg) lastSentHdgRef.current = targetHeading;
+
+      // Synchronous NavIndicator position — computed from the same mpp + offset
+      // used for the camera center, so the dot has zero async lag.
+      // In heading-up mode the map rotates so user is always straight below center;
+      // in north-up mode we project the heading vector onto screen axes.
+      const pitchFactor  = Math.cos((pitch * Math.PI) / 180);
+      const pixelsBehind = (netOffsetM / mpp) * pitchFactor;
+      const userScreenX  = headingUpRef.current
+        ? SW / 2
+        : SW / 2 - pixelsBehind * Math.sin(hRad);
+      const userScreenY  = headingUpRef.current
+        ? SH / 2 + pixelsBehind
+        : SH / 2 + pixelsBehind * Math.cos(hRad);
+      setNavIndicatorPos({ x: userScreenX, y: userScreenY });
 
       camera.animateTo({
         center:   { latitude: centerLat, longitude: centerLng },
         zoom:     finalZoom,
-        ...(sendHdg ? { heading: committed } : {}),
+        ...(sendHdg ? { heading: targetHeading } : {}),
         pitch,
         duration: 80,
       });
@@ -440,10 +461,27 @@ export default function MapScreen() {
     else           { stopNavigation();  setFollowMe(false); setNavStarted(false); }
   }, [startNavigation, stopNavigation]);
 
-  const handleResetNorth = useCallback(() => {
-    camera.animateTo({ heading: 0, pitch: 0, duration: 400 });
-    setCameraHeading(0);
-  }, [camera]);
+  const handleCompassPress = useCallback(() => {
+    if (!navigating) {
+      // Outside nav: classic north-reset
+      camera.animateTo({ heading: 0, pitch: 0, duration: 400 });
+      setCameraHeading(0);
+      return;
+    }
+    if (!followMe) {
+      // Panned away: re-lock + north-up
+      setFollowMe(true);
+      setHeadingUp(false);
+    } else if (!headingUp) {
+      // Following + north-up → switch to heading-up
+      setHeadingUp(true);
+    } else {
+      // Following + heading-up → back to north-up
+      setHeadingUp(false);
+      camera.animateTo({ heading: 0, duration: 400 });
+      setCameraHeading(0);
+    }
+  }, [navigating, followMe, headingUp, camera]);
 
   const handleLongPress = useCallback((e: any) => {
     const { latitude, longitude } = e.nativeEvent.coordinate;
@@ -673,6 +711,8 @@ export default function MapScreen() {
           mapRef={mapRef}
           navigating={navigating}
           isVehicleMode={isVehicleMode}
+          fixedPos={navigating ? navIndicatorPos : undefined}
+          headingUp={headingUp}
         />
       )}
 
@@ -740,7 +780,7 @@ export default function MapScreen() {
         nextNextPreview={nextNextPreview}
         approachPhase={navState?.approachPhase ?? null}
         cameraHeading={cameraHeading}
-        onResetNorth={handleResetNorth}
+        onResetNorth={handleCompassPress}
         stepEta={stepEta}
         walkInstruction={walkInstruction}
         walkDestination={walkDestination}

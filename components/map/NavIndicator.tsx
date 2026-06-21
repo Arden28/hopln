@@ -6,41 +6,36 @@
 //
 // Mode selection (controlled by the navigating + isVehicleMode props):
 //   Explore        — north-up map; dot + rotating orange cone (compass bearing)
-//   Walking nav    — camera faces heading; dot + cone pointing up (= forward)
-//   Vehicle nav    — on a transit leg or speed > 4 m/s; dot + Waze-style chevron
+//   Walking nav    — dot + orange cone; rotates in north-up, points up in heading-up
+//   Vehicle nav    — dot + clean blue chevron; same rotation logic
 //
 // Position strategy:
-//   Explore: pointForCoordinate at 20 Hz — tracks any pan/zoom/rotate
-//   Nav     : pointForCoordinate at 20 Hz — camera is offset ahead of user so
-//             dot is NOT at screen centre
+//   Nav mode   : fixedPos from camera tick (synchronous, zero async lag)
+//   Explore    : pointForCoordinate at 20 Hz — tracks any pan/zoom/rotate
 
 import { useHeadingStore } from "@/store/headingStore";
 import { useEffect, useRef, useState } from "react";
-import { Dimensions, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import MapView from "react-native-maps";
 import Svg, {
-  Circle,
   Defs,
-  LinearGradient,
   Path,
   RadialGradient,
   Stop as SvgStop,
 } from "react-native-svg";
 
 // ── Canvas geometry ───────────────────────────────────────────────────────────
-// 120 dp canvas — proportional and Google Maps-sized. Original 130 dp was too
-// wide (36% of a 360 dp screen); 120 dp is 33% with a properly sized dot.
-const SZ = 120;
-const CX = SZ / 2; // 60
-const CY = SZ / 2; // 60
+// 64 dp canvas — compact, matches Google Maps blue dot scale.
+const SZ = 64;
+const CX = SZ / 2; // 32
+const CY = SZ / 2; // 32
 
 // ── Dot ──────────────────────────────────────────────────────────────────────
-// 14 dp dot + 2.5 dp white border ≈ 19 dp visual — matches Google Maps scale.
-const DOT_R = 7;
+const DOT_R = 6;
 const DOT_D = DOT_R * 2;
 
 // ── Orange explore/walk cone ──────────────────────────────────────────────────
-const CONE_R   = 52;
+const CONE_R   = 28;
 const CONE_ANG = 28; // half-angle in degrees
 const aR       = (CONE_ANG * Math.PI) / 180;
 const lx       = +(CX + CONE_R * Math.sin(-aR)).toFixed(2);
@@ -49,16 +44,13 @@ const rx       = +(CX + CONE_R * Math.sin(aR)).toFixed(2);
 const ry       = +(CY - CONE_R * Math.cos(aR)).toFixed(2);
 const CONE_D   = `M ${CX} ${CY} L ${lx} ${ly} A ${CONE_R} ${CONE_R} 0 0 1 ${rx} ${ry} Z`;
 
-// ── Chevron path (Waze-style, pointing up, apex at top, notched base) ─────────
-// Scaled to 120×120 canvas (center 60, 60) from original 130×130 design.
-// Each point: new = (old - 65) × (120/130) + 60
-const CHEV_D = "M 60 13 L 99 100 Q 60 80 21 100 Z";
+// ── Blue vehicle chevron (64×64, apex at top, notched base) ───────────────────
+// Scaled from 120×120 original: factor = 64/120, re-centered to (32,32).
+const CHEV_D = "M 32 7 L 53 53 Q 32 43 11 53 Z";
 
-// Polling interval — 20 Hz matches camera interval so dot moves with the map
+// Polling interval for explore mode (20 Hz matches camera interval cadence)
 const POLL_INTERVAL = 50;
 
-const { width: SW, height: SH } = Dimensions.get("window");
-const INIT_POS = { x: SW / 2, y: SH * 0.6 };
 
 interface Props {
   latitude:      number;
@@ -66,21 +58,34 @@ interface Props {
   mapRef:        React.RefObject<MapView | null>;
   navigating:    boolean;
   isVehicleMode: boolean;
+  /** Synchronous screen position from the camera tick (nav mode only). */
+  fixedPos?:     { x: number; y: number };
+  /** Whether the camera is in heading-up (true) or north-up (false) mode. */
+  headingUp?:    boolean;
 }
 
-export function NavIndicator({ latitude, longitude, mapRef, navigating, isVehicleMode }: Props) {
-  // In nav mode this selector always returns 0 → compass updates never re-render
-  const angle = useHeadingStore((s) => (navigating ? 0 : s.heading));
+export function NavIndicator({
+  latitude, longitude, mapRef,
+  navigating, isVehicleMode,
+  fixedPos, headingUp = false,
+}: Props) {
+  // In heading-up nav mode the map already rotates → no indicator rotation needed.
+  // In north-up nav mode OR explore mode → rotate by compass bearing.
+  const angle = useHeadingStore(
+    (s) => (navigating && headingUp) ? 0 : s.heading
+  );
 
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
-  // Stabilise mapRef so the effect dependency is reliable
   const mapRefStable = useRef(mapRef);
   mapRefStable.current = mapRef;
 
+  // Polling only runs in explore mode; nav mode uses fixedPos from camera tick.
   useEffect(() => {
+    if (fixedPos) return; // synchronous position provided — skip polling
+
     let cancelled = false;
-    let busy      = false; // prevent concurrent pointForCoordinate calls
+    let busy      = false;
 
     const update = async () => {
       if (cancelled || busy) return;
@@ -100,34 +105,29 @@ export function NavIndicator({ latitude, longitude, mapRef, navigating, isVehicl
     update();
     const id = setInterval(update, POLL_INTERVAL);
     return () => { cancelled = true; clearInterval(id); };
-  }, [latitude, longitude]);
+  }, [latitude, longitude, fixedPos]);
 
-  if (!pos) return null;
+  // fixedPos takes priority; fall back to polled pos in explore mode.
+  const displayPos = fixedPos ?? pos;
+  if (!displayPos) return null;
 
   return (
-    <View pointerEvents="none" style={[s.canvas, { left: pos.x - CX, top: pos.y - CY }]}>
+    <View pointerEvents="none" style={[s.canvas, { left: displayPos.x - CX, top: displayPos.y - CY }]}>
 
-      {/* ── Vehicle mode: Waze-style white chevron with orange border ────────── */}
+      {/* ── Vehicle mode: flat blue chevron pointing in heading direction ──────── */}
       {navigating && isVehicleMode && (
         <Svg width={SZ} height={SZ} style={StyleSheet.absoluteFill}>
-          <Defs>
-            <LinearGradient id="chevGrad" x1="0" y1="0" x2="0" y2="1">
-              <SvgStop offset="0" stopColor="#FFFFFF" stopOpacity="1" />
-              <SvgStop offset="1" stopColor="#E8E8E8" stopOpacity="1" />
-            </LinearGradient>
-          </Defs>
-          {/* Drop shadow — slightly offset down-right */}
-          <Path d={CHEV_D} fill="rgba(0,0,0,0.20)" transform="translate(2, 4)" />
-          {/* Main chevron */}
+          {/* Soft shadow */}
+          <Path d={CHEV_D} fill="rgba(0,0,0,0.18)" transform={`rotate(${angle}, ${CX}, ${CY}) translate(1, 3)`} />
+          {/* Blue chevron — rotated to match heading */}
           <Path
             d={CHEV_D}
-            fill="url(#chevGrad)"
-            stroke="#FF6F00"
-            strokeWidth="2.5"
+            fill="#007AFF"
+            stroke="#FFFFFF"
+            strokeWidth="2"
             strokeLinejoin="round"
+            transform={`rotate(${angle}, ${CX}, ${CY})`}
           />
-          {/* Orange accent pivot dot */}
-          <Circle cx={CX} cy={CY + 8} r={4} fill="#FF6F00" />
         </Svg>
       )}
 
@@ -141,7 +141,6 @@ export function NavIndicator({ latitude, longitude, mapRef, navigating, isVehicl
               <SvgStop offset="1"   stopColor="#FF6F00" stopOpacity="0"    />
             </RadialGradient>
           </Defs>
-          {/* angle=0 in nav mode (camera faces heading), rotates to compass in explore */}
           <Path
             d={CONE_D}
             fill="url(#coneGrad)"

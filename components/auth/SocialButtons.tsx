@@ -22,9 +22,10 @@ interface Props {
   onNeedsPhone: (setupToken: string) => void;
   onError: (message: string) => void;
   disabled?: boolean;
+  showDivider?: boolean;
 }
 
-export function SocialButtons({ onSuccess, onNeedsPhone, onError, disabled }: Props) {
+export function SocialButtons({ onSuccess, onNeedsPhone, onError, disabled, showDivider = true }: Props) {
   const dark = useColorScheme() === "dark";
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
@@ -118,11 +119,13 @@ export function SocialButtons({ onSuccess, onNeedsPhone, onError, disabled }: Pr
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.dividerRow}>
-        <View style={[styles.line, { backgroundColor: divColor }]} />
-        <Text style={[styles.dividerText, { color: divTextColor }]}>or continue with</Text>
-        <View style={[styles.line, { backgroundColor: divColor }]} />
-      </View>
+      {showDivider && (
+        <View style={styles.dividerRow}>
+          <View style={[styles.line, { backgroundColor: divColor }]} />
+          <Text style={[styles.dividerText, { color: divTextColor }]}>or continue with</Text>
+          <View style={[styles.line, { backgroundColor: divColor }]} />
+        </View>
+      )}
 
       <Pressable
         style={[

@@ -8,7 +8,7 @@ import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
 import { getRouteColor } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -64,6 +64,13 @@ export default function SearchScreen() {
   const dark        = useColorScheme() === "dark";
   const C           = makeC(dark);
 
+  // ── Deep-link pre-fill (from route.tsx share redirect) ───────────────────────
+  const dlParams = useLocalSearchParams<{
+    fLat?: string; fLng?: string; fName?: string;
+    tLat?: string; tLng?: string; tName?: string;
+  }>();
+  const hasDeepLink = !!(dlParams.fLat && dlParams.fLng && dlParams.tLat && dlParams.tLng);
+
   // ── Journey state ────────────────────────────────────────────────────────────
   const [currentLocation, setCurrentLocation] = useState<UnifiedLocation | null>(null);
   const [fromQ, setFromQ] = useState("");
@@ -106,6 +113,28 @@ export default function SearchScreen() {
   const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const [availableRoutes, setAvailableRoutes]   = useState<Route[]>([]);
   const [isFetchingRoutes, setIsFetchingRoutes] = useState(false);
+
+  // Pre-populate from/to when arriving via a shared route link
+  useEffect(() => {
+    if (!hasDeepLink) return;
+    const from: UnifiedLocation = {
+      _type: 'location',
+      id:    dlParams.fName || 'Origin',
+      name:  dlParams.fName || 'Origin',
+      lat:   parseFloat(dlParams.fLat!),
+      lng:   parseFloat(dlParams.fLng!),
+    };
+    const to: UnifiedLocation = {
+      _type: 'location',
+      id:    dlParams.tName || 'Destination',
+      name:  dlParams.tName || 'Destination',
+      lat:   parseFloat(dlParams.tLat!),
+      lng:   parseFloat(dlParams.tLng!),
+    };
+    setFromLoc(from);  setFromQ(from.name);
+    setToLoc(to);      setToQ(to.name);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Current location permission
   useEffect(() => {
@@ -349,7 +378,7 @@ export default function SearchScreen() {
           <View style={s.inputWrapper}>
             <TextInput
               ref={toInputRef}
-              autoFocus
+              autoFocus={!hasDeepLink}
               value={toQ}
               onChangeText={(txt) => { setToQ(txt); setToLoc(null); }}
               onFocus={() => setFocusedField("to")}

@@ -218,7 +218,7 @@ function CustomTabBar({
     <View
       style={[
         styles.tabBar,
-        { paddingBottom: Platform.OS === "ios" ? insets.bottom - 5 : 0, backgroundColor: tabBarBg },
+        { paddingBottom: Platform.OS === "ios" ? Math.max(insets.bottom - 5, 0) : insets.bottom, backgroundColor: tabBarBg },
       ]}
     >
       {TABS.map((tab) => {
