@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet, View, TextInput, TouchableOpacity, ScrollView,
-  SafeAreaView, Animated, ActivityIndicator, KeyboardAvoidingView,
+  Animated, ActivityIndicator, KeyboardAvoidingView,
   Platform, useColorScheme, Alert, Dimensions, Text,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
@@ -99,9 +100,10 @@ function makeC(dark: boolean) {
 }
 
 export default function KwameScreen() {
-  const router = useRouter();
-  const dark   = useColorScheme() === 'dark';
-  const C      = makeC(dark);
+  const router  = useRouter();
+  const dark    = useColorScheme() === 'dark';
+  const C       = makeC(dark);
+  const insets  = useSafeAreaInsets();
 
   const { messages, addMessage, loadHistory, clearHistory } = useChatStore();
   const setJourney    = useJourneyStore((state: any) => state.setJourney);
@@ -490,7 +492,7 @@ export default function KwameScreen() {
   const voiceContainerScale   = voiceTransitionAnim.interpolate({ inputRange: [0, 1], outputRange: [1.1, 1] });
 
   return (
-    <SafeAreaView style={[styles.masterContainer, { backgroundColor: C.bg }]}>
+    <SafeAreaView edges={['top']} style={[styles.masterContainer, { backgroundColor: C.bg }]}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.masterContainer}>
 
         <Animated.View style={[styles.chatView, { transform: [{ scale: chatScale }], opacity: chatOpacity }]} pointerEvents={uiMode === 'chat' ? 'auto' : 'none'}>
@@ -574,7 +576,7 @@ export default function KwameScreen() {
             </Animated.View>
           )}
 
-          <View style={[styles.bottomInputDock, { backgroundColor: C.bg, borderTopColor: C.border }]}>
+          <View style={[styles.bottomInputDock, { backgroundColor: C.bg, borderTopColor: C.border, paddingBottom: insets.bottom + 10 }]}>
             <View style={[styles.inputPillContainer, { backgroundColor: C.card, opacity: isProcessing ? 0.6 : 1 }]}>
               <TouchableOpacity style={styles.dockAddonButton} disabled={isProcessing}>
                 <Ionicons name="add" size={24} color={C.sub} />
@@ -650,7 +652,7 @@ const styles = StyleSheet.create({
   loaderBubble:       { paddingHorizontal: 24, paddingVertical: 14, borderTopLeftRadius: 4, borderTopRightRadius: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 16, justifyContent: 'center', alignItems: 'center' },
   fabContainer:       { position: 'absolute', bottom: 70, right: 16, zIndex: 10 },
   fab:                { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 4 },
-  bottomInputDock:    { paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
+  bottomInputDock:    { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10, flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
   inputPillContainer: { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', borderRadius: 22, paddingHorizontal: 12, marginRight: 10 },
   dockAddonButton:    { marginRight: 4, padding: 4 },
   textInputField:     { flex: 1, fontSize: 15, paddingVertical: 0 },

@@ -4,10 +4,12 @@ import { SettingsService, UserSettings } from "@/services/settings";
 import { useAuthStore } from "@/store/authStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -149,6 +151,15 @@ export default function Privacy() {
   const [bgLocation, setBgLocation] = useState(true);
   const [precise,    setPrecise]    = useState(true);
 
+  // Actual OS-level location permission status (null = still checking)
+  const [fgPermGranted, setFgPermGranted] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    Location.getForegroundPermissionsAsync()
+      .then(({ status }) => setFgPermGranted(status === "granted"))
+      .catch(() => setFgPermGranted(null));
+  }, []);
+
   useEffect(() => {
     // Load server settings
     SettingsService.get()
@@ -279,6 +290,23 @@ export default function Privacy() {
 
         {/* ── Location ─────────────────────────────────────────────────────── */}
         <Section title="LOCATION" C={C}>
+          {fgPermGranted === false && (
+            <Pressable
+              style={[s.permBanner, { backgroundColor: C.softOrange }]}
+              onPress={() => Linking.openSettings()}
+            >
+              <Ionicons name="warning-outline" size={16} color={ORANGE} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[s.permBannerTitle, { color: ORANGE }]}>
+                  Location access not granted
+                </Text>
+                <Text style={[s.permBannerDesc, { color: C.subText }]}>
+                  Navigo can't show your position or nearby stops. Tap to open Settings and enable location.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={15} color={ORANGE} />
+            </Pressable>
+          )}
           <ToggleRow
             C={C}
             icon="location-outline"
@@ -433,4 +461,15 @@ const s = StyleSheet.create({
     paddingBottom:  8,
   },
   legalText: { flex: 1, fontSize: 12, lineHeight: 18 },
+
+  permBanner: {
+    flexDirection:   "row",
+    alignItems:      "center",
+    gap:              10,
+    borderRadius:     10,
+    padding:          12,
+    marginBottom:     10,
+  },
+  permBannerTitle: { fontSize: 13, fontWeight: "600" },
+  permBannerDesc:  { fontSize: 12, lineHeight: 17 },
 });

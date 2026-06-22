@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  SafeAreaView, Switch, ActivityIndicator, useColorScheme, Animated,
+  Switch, ActivityIndicator, useColorScheme, Animated,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAudioPlayer, AudioModule } from 'expo-audio';
@@ -211,9 +212,10 @@ function StyleRow({
 // ─── Screen ───────────────────────────────────────────────────────────────────────
 
 export default function KwameSettingsScreen() {
-  const router = useRouter();
-  const dark   = useColorScheme() === 'dark';
-  const C      = makeC(dark);
+  const router  = useRouter();
+  const dark    = useColorScheme() === 'dark';
+  const C       = makeC(dark);
+  const insets  = useSafeAreaInsets();
 
   const { settings, load, set } = useKwameSettingsStore();
   // Single previewing ID covers both voice-persona and language rows — prevents concurrent previews.
@@ -282,7 +284,7 @@ export default function KwameSettingsScreen() {
   const holdPct  = ((settings.silenceHoldMs - 700)         / 1300)          * 100;
 
   return (
-    <SafeAreaView style={[s.root, { backgroundColor: C.bg }]}>
+    <SafeAreaView edges={['top']} style={[s.root, { backgroundColor: C.bg }]}>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <View style={[s.header, { backgroundColor: C.bg, borderBottomColor: C.border }]}>
@@ -417,7 +419,7 @@ export default function KwameSettingsScreen() {
           Lower sensitivity reduces false triggers. Higher hold adds patience before sending.
         </Text>
 
-        <View style={{ height: 48 }} />
+        <View style={{ height: insets.bottom + 32 }} />
       </ScrollView>
     </SafeAreaView>
   );

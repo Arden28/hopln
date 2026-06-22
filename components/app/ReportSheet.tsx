@@ -14,9 +14,10 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const { width: SW } = Dimensions.get("window");
-const SHEET_H = 580; // taller to accommodate the 9-category grid
+const { width: SW, height: SH } = Dimensions.get("window");
+const SHEET_H = Math.min(580, Math.max(440, SH * 0.72));
 
 const CATS: {
   id:    ReportCategory;
@@ -49,6 +50,7 @@ interface Props {
 }
 
 export default function ReportSheet({ onClose, userLat, userLng }: Props) {
+  const insets = useSafeAreaInsets();
   const dark = useColorScheme() === "dark";
 
   const [selectedCat, setSelectedCat] = useState<ReportCategory | null>(null);
@@ -208,7 +210,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
 
         {/* ── Confirmation footer ────────────────────────────────────────────── */}
         {selected && !busy && !done && (
-          <View style={[s.footer, { borderTopColor: divider, backgroundColor: bg }]}>
+          <View style={[s.footer, { borderTopColor: divider, backgroundColor: bg, paddingBottom: insets.bottom + 12 }]}>
             <View style={s.footerInner}>
               <View style={[s.footerIconWrap, { backgroundColor: selected.color + "18" }]}>
                 <Ionicons name={selected.icon} size={18} color={selected.color} />
@@ -366,7 +368,7 @@ const s = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 20,
+    paddingBottom: 12, // base; insets.bottom added inline
   },
   footerInner:    { flexDirection: "row", alignItems: "center", gap: 10 },
   footerIconWrap: {

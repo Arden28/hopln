@@ -55,6 +55,7 @@ module.exports = {
 
     android: {
       package: "com.navigo.ke",
+      googleServicesFile: "./google-services.json",
       intentFilters: [
         {
           "action": "VIEW",
@@ -81,7 +82,7 @@ module.exports = {
       },
       adaptiveIcon: {
         backgroundColor: "#E6F4FE", 
-        foregroundImage: "./assets/images/navigo.png",
+        foregroundImage: "./assets/images/navigo-android.png",
         monochromeImage: "./assets/images/navigo-monochrome.png",
       },
       edgeToEdgeEnabled: true,

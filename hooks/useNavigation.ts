@@ -183,7 +183,10 @@ export function useNavigation() {
 
   const handleLocationUpdate = useCallback((loc: Location.LocationObject) => {
     if (!mountedRef.current) return;
-    if ((loc.coords.accuracy ?? 0) > 45) return; // reject low-quality fixes (multipath noise)
+    // First fix: accept up to 150 m to seed the initial map position.
+    // Subsequent fixes: tighten to 45 m to reject multipath noise.
+    const accuracyCap = meSmoothRef.current === null ? 150 : 45;
+    if ((loc.coords.accuracy ?? 0) > accuracyCap) return;
 
     const currentStepType = engineRef.current?.steps[stepIndexRef.current]?.type ?? "WALK";
     const EMA_LOC = currentStepType !== "WALK" ? EMA_LOC_TRANSIT : EMA_LOC_WALK;
@@ -448,8 +451,8 @@ export function useNavigation() {
 
   useEffect(() => {
     const gpsOptions = isNavigating
-      ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 3 }
-      : { accuracy: Location.Accuracy.Low,  timeInterval: 20000, distanceInterval: 50 };
+      ? { accuracy: Location.Accuracy.High,     timeInterval: 1_000,  distanceInterval: 3 }
+      : { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 5 };
 
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -462,6 +465,11 @@ export function useNavigation() {
       requestBackgroundPermission().then((granted) => {
         if (mountedRef.current) setBgPermGranted(granted);
       });
+
+      // Warm-start: show cached position immediately so the map doesn't spin
+      // while waiting for the first watcher event (esp. relevant when stationary).
+      const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 300_000 });
+      if (lastKnown && mountedRef.current) handleLocationUpdate(lastKnown);
 
       watchRef.current = await Location.watchPositionAsync(gpsOptions, handleLocationUpdate);
 

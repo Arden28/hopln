@@ -27,7 +27,9 @@ const BG         = "#FFFFFF";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const MAX_Y = SCREEN_HEIGHT * 0.08;
-const MIN_Y = SCREEN_HEIGHT - 310;
+// Peek height: capped at 310 on large phones, shrinks to ~40% on small devices (e.g. SE).
+const PEEK_H = Math.min(310, Math.max(220, SCREEN_HEIGHT * 0.40));
+const MIN_Y  = SCREEN_HEIGHT - PEEK_H;
 
 function arrivalTime(secs: number): string {
   return new Date(Date.now() + secs * 1000).toLocaleTimeString([], {

@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "558501910148",
+    "project_id": "project-f1bae89b-0a13-4d68-a80",
+    "storage_bucket": "project-f1bae89b-0a13-4d68-a80.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:558501910148:android:d5ccacf65eb3ea675414d1",
+        "android_client_info": {
+          "package_name": "com.navigo.ke"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "558501910148-at77du2gssthvdghn156js6tjopc0ej7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.navigo.ke",
+            "certificate_hash": "7f02ada9f43ffb962924f864ec9389919856d2df"
+          }
+        },
+        {
+          "client_id": "558501910148-j6auglt4p630ks07d82roobc8u5k1k0d.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMCYstiRFTZs8bHlI_5nXb77jBtFQhTMU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "558501910148-j6auglt4p630ks07d82roobc8u5k1k0d.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "558501910148-pkv782s6rsshdmu3esmdlc5nj3ld0r2g.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.navigo.ke"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

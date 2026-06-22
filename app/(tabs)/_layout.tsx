@@ -443,11 +443,11 @@ const styles = StyleSheet.create({
     paddingVertical:  8,
     paddingHorizontal: 14,
     borderRadius:     100,
+    overflow:         "hidden", // enforces rounded clip on Android
     gap:               7,
   },
   tabPillActive: {
     backgroundColor: ORANGE,
-    elevation:        4,
   },
   tabLabel: {
     color:      INACTIVE_BLACK,
