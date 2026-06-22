@@ -2,7 +2,7 @@
 import { RouteStop, Step, WalkSubStep, getRouteColor, maneuverIcon, mToNice, sToMin } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 
 const ORANGE     = "#FF6F00";
 const BLACK      = "#1C1C1E";
@@ -17,40 +17,6 @@ function formatStepEta(d: Date): string {
 }
 
 const RAIL_W = 46;
-
-// ─── You-are-here animated position indicator ────────────────────────────────
-
-function YouAreHereDot({ size = 32 }: { size?: number }) {
-  const anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, { toValue: 1, duration: 850, useNativeDriver: true }),
-        Animated.timing(anim, { toValue: 0, duration: 850, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [anim]);
-
-  const scale   = anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.35] });
-  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.75] });
-
-  return (
-    <Animated.View
-      style={{
-        position:        "absolute",
-        width: size,     height: size,    borderRadius: size / 2,
-        left: "50%",     marginLeft:      -(size / 2),
-        top: "50%",      marginTop:       -(size / 2),
-        backgroundColor: ORANGE,
-        transform:       [{ scale }],
-        opacity,
-      }}
-    />
-  );
-}
 
 // ─── Walk connector dots ──────────────────────────────────────────────────────
 
@@ -136,7 +102,6 @@ function WalkRow({ step, isActive, isPassed, stepEta, navigating }: { step: Step
       <Pressable style={wr.row} onPress={() => hasSubs && setOpen((v) => !v)} disabled={!hasSubs}>
         <View style={wr.rail}>
           <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center" }}>
-            {isActive && <YouAreHereDot size={36} />}
             <Ionicons name="walk" size={20} color={isActive ? ORANGE : GREY} />
           </View>
         </View>
@@ -243,7 +208,6 @@ function TransitSection({
       <View style={ts.row}>
         <View style={ts.rail}>
           <View style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-            {isActive && <YouAreHereDot size={40} />}
             <View style={[ts.busCircle, { backgroundColor: C.bg, borderColor: C.border }]}>
               <Ionicons name="bus" size={18} color={C.text} />
             </View>

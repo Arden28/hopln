@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 // Text is kept for ClusterBubble count label
 import { Marker } from "react-native-maps";
@@ -13,7 +13,6 @@ interface Cluster {
   stop: Stop | null; // non-null only when count === 1
 }
 
-const ORANGE          = "#FF6F00";
 const CLUSTER_COLORS  = ["#FF9F43", "#FF6F00", "#C0392B"] as const; // sm / md / lg
 const STOPS_MIN_ZOOM  = 13.0;
 
@@ -107,20 +106,29 @@ function SelectedStopMarker({ stop, onPress }: { stop: Stop; onPress: (stop: Sto
   );
 }
 
-export default function StopsLayer({
+function StopsLayer({
   allStops,
   viewCenter,
   viewZoom,
   selected,
   onPress,
 }: Props) {
+  // Debounce zoom so clustering only reruns after the pinch gesture settles,
+  // not on every intermediate frame.
+  const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [stableZoom, setStableZoom] = useState(viewZoom);
+  useEffect(() => {
+    if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+    zoomTimerRef.current = setTimeout(() => setStableZoom(viewZoom), 100);
+    return () => { if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current); };
+  }, [viewZoom]);
 
   const { clusters, selectedStop } = useMemo(() => {
-    if (!viewCenter || viewZoom < STOPS_MIN_ZOOM) {
+    if (!viewCenter || stableZoom < STOPS_MIN_ZOOM) {
       return { clusters: [], selectedStop: selected ?? null };
     }
 
-    const r = radiusForZoom(viewZoom);
+    const r = radiusForZoom(stableZoom);
     if (r <= 0) return { clusters: [], selectedStop: selected ?? null };
 
     // 1. Bounding-box pre-filter (fast, no sqrt)
@@ -147,7 +155,7 @@ export default function StopsLayer({
     );
 
     // 3. Grid clustering
-    const cs = cellDeg(viewZoom);
+    const cs = cellDeg(stableZoom);
 
     if (cs === 0) {
       // No clustering, render individual markers (capped to avoid overload)
@@ -182,7 +190,7 @@ export default function StopsLayer({
     }
 
     return { clusters: result, selectedStop: selected ?? null };
-  }, [allStops, viewCenter?.lat, viewCenter?.lng, viewZoom, selected?.id]);
+  }, [allStops, viewCenter?.lat, viewCenter?.lng, stableZoom, selected?.id]);
 
   return (
     <>
@@ -215,6 +223,15 @@ export default function StopsLayer({
     </>
   );
 }
+
+export default React.memo(StopsLayer, (prev, next) =>
+  prev.allStops         === next.allStops         &&
+  prev.viewZoom         === next.viewZoom          &&
+  prev.selected?.id     === next.selected?.id      &&
+  prev.viewCenter?.lat  === next.viewCenter?.lat   &&
+  prev.viewCenter?.lng  === next.viewCenter?.lng   &&
+  prev.onPress          === next.onPress
+);
 
 // ── Cluster bubble ─────────────────────────────────────────────────────────────
 

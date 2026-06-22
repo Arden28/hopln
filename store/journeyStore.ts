@@ -43,7 +43,11 @@ export const useJourneyStore = create<JourneyState>((set, get) => ({
     }),
   updateRoute: (route) => {
     const j = get().activeJourney;
-    if (j) set({ activeJourney: { ...j, route } });
+    if (!j) return;
+    // Skip if OTP returned the same route (no-op reroute) — prevents a full map re-render.
+    // Route has no server-assigned id; use summary + distance as a cheap identity key.
+    if (j.route?.summary === route.summary && j.route?.total_distance === route.total_distance) return;
+    set({ activeJourney: { ...j, route } });
   },
   setTripStatus: (status) => set({ tripStatus: status }),
   clearJourney: () => set({ activeJourney: null, tripStatus: "IDLE" }),

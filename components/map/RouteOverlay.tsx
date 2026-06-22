@@ -1,3 +1,4 @@
+import React from "react";
 import type { IntermediateStop, LocMarker, NodeMarker, TransitLeg, WalkLeg } from "@/components/map/types";
 import { DestinationPin, IntermediateStopDot, SquarePin, TrackedNodeMarker } from "@/components/map/RouteMarkers";
 import { Marker, Polyline } from "react-native-maps";
@@ -52,11 +53,13 @@ interface RouteOverlayProps {
   currentWalkLegIdx?: number;
   userLat?:           number;
   userLng?:           number;
+  /** Current map zoom level — intermediate stop dots are hidden below zoom 14. */
+  viewZoom?:          number;
 }
 
-export function RouteOverlay({
+function _RouteOverlay({
   walkLegs, transitLegs, nodeMarkers, locMarkers, intermediateStops, onIntermStopPress,
-  boardingNodeId, currentStepIndex, currentWalkLegIdx = -1, userLat, userLng,
+  boardingNodeId, currentStepIndex, currentWalkLegIdx = -1, userLat, userLng, viewZoom,
 }: RouteOverlayProps) {
   return (
     <>
@@ -99,15 +102,16 @@ export function RouteOverlay({
             coordinates={leg.coords}
             strokeColor={color}
             strokeColors={[color, color]}
-            strokeWidth={5}
+            strokeWidth={traveled ? 4 : 8}
             zIndex={traveled ? 1 : 2}
             geodesic
           />
         );
       })}
 
-      {/* Intermediate stops — small route-coloured dots between board and alight */}
-      {intermediateStops.map((s) => (
+      {/* Intermediate stops — small route-coloured dots between board and alight.
+          Hidden below zoom 14 where they visually collide. */}
+      {(viewZoom == null || viewZoom >= 14) && intermediateStops.map((s) => (
         <Marker
           key={s.id}
           coordinate={s.coord}
@@ -140,3 +144,17 @@ export function RouteOverlay({
     </>
   );
 }
+
+export const RouteOverlay = React.memo(_RouteOverlay, (prev, next) =>
+  prev.walkLegs          === next.walkLegs          &&
+  prev.transitLegs       === next.transitLegs       &&
+  prev.nodeMarkers       === next.nodeMarkers       &&
+  prev.locMarkers        === next.locMarkers        &&
+  prev.intermediateStops === next.intermediateStops &&
+  prev.boardingNodeId    === next.boardingNodeId    &&
+  prev.currentStepIndex  === next.currentStepIndex  &&
+  prev.currentWalkLegIdx === next.currentWalkLegIdx &&
+  prev.userLat           === next.userLat           &&
+  prev.userLng           === next.userLng           &&
+  prev.viewZoom          === next.viewZoom
+);

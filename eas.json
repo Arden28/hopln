@@ -31,6 +31,16 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "laudbouetoumoussa@gmail.com",
+        "ascAppId": "YOUR_ASC_APP_ID",
+        "appleTeamId": "R7YXJ7XRCN"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "internal"
+      }
+    }
   }
 }

@@ -31,7 +31,7 @@ const CX = SZ / 2; // 32
 const CY = SZ / 2; // 32
 
 // ── Dot ──────────────────────────────────────────────────────────────────────
-const DOT_R = 6;
+const DOT_R = 10;
 const DOT_D = DOT_R * 2;
 
 // ── Orange explore/walk cone ──────────────────────────────────────────────────
@@ -169,12 +169,12 @@ const s = StyleSheet.create({
     height:          DOT_D,
     borderRadius:    DOT_R,
     backgroundColor: "#FF6F00",
-    borderWidth:     2.5,
+    borderWidth:     3,
     borderColor:     "#FFFFFF",
-    elevation:       4,
+    elevation:       5,
     shadowColor:     "#000",
-    shadowOpacity:   0.25,
-    shadowRadius:    3,
-    shadowOffset:    { width: 0, height: 1 },
+    shadowOpacity:   0.28,
+    shadowRadius:    4,
+    shadowOffset:    { width: 0, height: 2 },
   },
 });

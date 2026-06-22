@@ -95,6 +95,10 @@ interface JourneyDetailsSheetProps {
   onUnsave?: () => Promise<void>;
   children?: React.ReactNode;
   scrollRef?: React.RefObject<ScrollView | null>;
+  /** Live ETA from the nav engine — updated on every GPS fix while navigating. */
+  eta?: Date | null;
+  /** Live remaining distance in metres — used to update the sub-label while navigating. */
+  remainingDistanceM?: number | null;
 }
 
 export default function JourneyDetailsSheet({
@@ -110,11 +114,31 @@ export default function JourneyDetailsSheet({
   onUnsave,
   children,
   scrollRef,
+  eta = null,
+  remainingDistanceM = null,
 }: JourneyDetailsSheetProps): React.JSX.Element | null {
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const lastY      = useRef(MIN_Y);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Anchor: initial distance + planned duration, captured on the first GPS fix after nav starts.
+  // Remaining time = durationS × (currentDistM / initialDistM) — progress-based, not clock-based.
+  // "Arrive at" = Date.now() + remaining — updates with real time even when stationary.
+  const navAnchorRef = useRef<{ initialDistM: number; durationS: number } | null>(null);
+  useEffect(() => {
+    if (navigating && routeInfo && remainingDistanceM != null && !navAnchorRef.current) {
+      navAnchorRef.current = { initialDistM: remainingDistanceM, durationS: routeInfo.duration };
+    } else if (!navigating) {
+      navAnchorRef.current = null;
+    }
+  }, [navigating, routeInfo, remainingDistanceM]);
+  // Force a re-render every 30 s so the countdown ticks even between GPS fixes.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!navigating) return;
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [navigating]);
   const dark = useColorScheme() === "dark";
   const { prefs } = usePrefsStore();
   const C = {
@@ -193,14 +217,29 @@ export default function JourneyDetailsSheet({
               </View>
             ) : (
               <>
-                <Text style={[s.timeText, { color: C.text }]}>
-                  {routeInfo ? sToMin(routeInfo.duration).replace("~", "") : "--"}
-                </Text>
-                {routeInfo && (
-                  <Text style={s.arrivalText}>
-                    Arrive at {arrivalTime(routeInfo.duration)}
-                  </Text>
-                )}
+                {(() => {
+                  const anchor = navAnchorRef.current;
+                  const liveRemainS = (navigating && anchor && remainingDistanceM != null && anchor.initialDistM > 0)
+                    ? Math.round(anchor.durationS * Math.max(0, remainingDistanceM / anchor.initialDistM))
+                    : null;
+                  return (
+                    <>
+                      <Text style={[s.timeText, { color: C.text }]}>
+                        {liveRemainS != null
+                          ? sToMin(liveRemainS).replace("~", "")
+                          : routeInfo ? sToMin(routeInfo.duration).replace("~", "") : "--"}
+                      </Text>
+                      {routeInfo && (
+                        <Text style={s.arrivalText}>
+                          Arrive at{" "}
+                          {liveRemainS != null
+                            ? new Date(Date.now() + liveRemainS * 1_000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+                            : arrivalTime(routeInfo.duration)}
+                        </Text>
+                      )}
+                    </>
+                  );
+                })()}
               </>
             )}
           </View>

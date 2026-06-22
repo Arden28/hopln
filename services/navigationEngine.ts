@@ -27,7 +27,7 @@ export interface NavStep {
 
 export type EngineStatus  = "active" | "off_route" | "rerouting" | "arrived";
 /** How far the user is from the next maneuver. Null when already at final step. */
-export type ApproachPhase = "far" | "near" | "imminent" | null;
+export type ApproachPhase = "preview" | "far" | "near" | "imminent" | null;
 
 export interface EngineResult {
   status:             EngineStatus;
@@ -75,9 +75,16 @@ const SEARCH_BACK_M      = 150;
 const SEARCH_AHEAD_M     = 500;
 /** Early-advance buffer: treat a step as reached when within this many m. */
 const STEP_REACH_M       = 18;
-// Approach-phase thresholds (metres to next maneuver)
+// Approach-phase thresholds (metres to next maneuver) — 4-stage system:
+// preview (>500 m, silent) → far (~500 m) → near (~300 m) → imminent (<100 m)
+const PHASE_PREVIEW_M    = 500;
 const PHASE_FAR_M        = 300;
 const PHASE_NEAR_M       = 100;
+// Exit hysteresis: phase only reverts when distance rises past these wider bounds.
+// Prevents voice-cue re-triggering at GPS jitter boundaries.
+const PHASE_PREVIEW_EXIT_M = 560;
+const PHASE_FAR_EXIT_M   = 340;
+const PHASE_NEAR_EXIT_M  = 130;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -168,6 +175,8 @@ export class NavigationEngine {
   private offRouteStrikes = 0;
   /** The furthest distanceAlongRoute we've ever confirmed. Prevents backward snap. */
   private highWaterMark = 0;
+  /** Persisted approach phase — guards against flip-flopping at threshold boundaries. */
+  private _approachPhase: ApproachPhase = null;
 
   constructor(rawCoords: [number, number][], steps: NavStep[]) {
     // ── Degenerate route guard: remove consecutive duplicate coordinates ──────
@@ -396,6 +405,9 @@ export class NavigationEngine {
         break;
       }
     }
+    // Reset approach phase when the user advances to a new step so the new
+    // step's phase initialises fresh rather than inheriting the old one.
+    if (newStepIndex !== stepIndex) this._approachPhase = null;
 
     // ── 4. Hybrid ETA ─────────────────────────────────────────────────────
     const now                 = Date.now();
@@ -411,9 +423,24 @@ export class NavigationEngine {
 
     let approachPhase: ApproachPhase = null;
     if (upcomingStep && newStepIndex < this.steps.length - 1) {
-      if      (distanceToNextStepM > PHASE_FAR_M)  approachPhase = "far";
-      else if (distanceToNextStepM > PHASE_NEAR_M) approachPhase = "near";
-      else                                          approachPhase = "imminent";
+      const d = distanceToNextStepM;
+      if (this._approachPhase === null) {
+        // First update for this step: initialise from current distance.
+        if      (d >= PHASE_PREVIEW_M) this._approachPhase = "preview";
+        else if (d >  PHASE_FAR_M)     this._approachPhase = "far";
+        else if (d >  PHASE_NEAR_M)    this._approachPhase = "near";
+        else                           this._approachPhase = "imminent";
+      } else {
+        // Hysteresis: only transition when distance clearly crosses the exit bound.
+        const p = this._approachPhase;
+        if      (p === "preview"  && d <  PHASE_PREVIEW_M)     this._approachPhase = "far";
+        else if (p === "far"      && d >= PHASE_PREVIEW_EXIT_M) this._approachPhase = "preview";
+        else if (p === "far"      && d <= PHASE_FAR_M)          this._approachPhase = "near";
+        else if (p === "near"     && d >  PHASE_FAR_EXIT_M)     this._approachPhase = "far";
+        else if (p === "near"     && d <= PHASE_NEAR_M)         this._approachPhase = "imminent";
+        else if (p === "imminent" && d >  PHASE_NEAR_EXIT_M)    this._approachPhase = "near";
+      }
+      approachPhase = this._approachPhase;
     }
 
     // ── 6. Route bearing ──────────────────────────────────────────────────
@@ -458,6 +485,7 @@ export class NavigationEngine {
   resetProgress() {
     this.highWaterMark   = 0;
     this.offRouteStrikes = 0;
+    this._approachPhase  = null;
   }
 
   /**
@@ -465,8 +493,10 @@ export class NavigationEngine {
    * Moves the high-water mark forward using the last known speed.
    */
   deadReckon(speedMps: number, elapsedS: number) {
-    const advance = Math.max(0, speedMps * elapsedS);
-    this.highWaterMark = Math.min(this.highWaterMark + advance, this.totalDistM);
+    // Clamp to 30 m/s (108 km/h) so a stale high-speed reading during GPS outage
+    // can't teleport the dead-reckoned position by kilometres.
+    const clamped = Math.min(Math.max(0, speedMps), 30);
+    this.highWaterMark = Math.min(this.highWaterMark + clamped * elapsedS, this.totalDistM);
   }
 
   getHighWaterMark(): number { return this.highWaterMark; }

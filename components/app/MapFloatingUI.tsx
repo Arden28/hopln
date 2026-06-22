@@ -42,6 +42,7 @@ interface MapFloatingUIProps {
   approachPhase?:     string | null;
   cameraHeading?:     number;
   onResetNorth:       () => void;
+  headingUp?:         boolean;
   // Walking-specific nav enhancements
   stepEta?:           Date | null;
   walkInstruction?:   string | null;
@@ -70,7 +71,7 @@ export default function MapFloatingUI({
   arrivalSoonShown, activeJourney, onClearJourney,
   bottomOffset = 0, gpsLost = false, currentSpeedKph, wrongDirection = false,
   onOpenReport, onOpenLayers,
-  nextNextPreview, approachPhase, cameraHeading, onResetNorth,
+  nextNextPreview, approachPhase, cameraHeading, onResetNorth, headingUp = false,
   stepEta, walkInstruction, walkDestination,
 }: MapFloatingUIProps): JSX.Element {
   const insets    = useSafeAreaInsets();
@@ -99,7 +100,13 @@ export default function MapFloatingUI({
       onToggleNav();
       lastTap.current = 0;
     } else {
-      onRecenter();
+      // In nav mode: single-tap cycles the three compass states via handleCompassPress.
+      // In explore mode: single-tap centers the camera on the user.
+      if (navigating) {
+        onResetNorth();
+      } else {
+        onRecenter();
+      }
       lastTap.current = now;
     }
   };
@@ -270,16 +277,19 @@ export default function MapFloatingUI({
               },
             ]}
           >
-            <Ionicons name="megaphone-outline" size={22} color={ORANGE} />
+            <Ionicons name="warning-outline" size={22} color={ORANGE} />
           </Pressable>
 
-          {/* Recenter/Compass */}
+          {/* Compass / heading-mode toggle — three states:
+              unlocked (panned away): blue locate → tap to re-lock
+              locked + north-up:      orange navigate-circle → tap for heading-up
+              locked + heading-up:    blue compass → tap back to north-up */}
           <Pressable
             onPress={handleNavBtn}
             style={[
               s.navBtn,
-              { backgroundColor: cameraUnlocked ? BLUE : cardBg },
-              dark && !cameraUnlocked && {
+              { backgroundColor: (cameraUnlocked || headingUp) ? BLUE : cardBg },
+              dark && !cameraUnlocked && !headingUp && {
                 borderTopColor:    "rgba(255,255,255,0.08)",
                 borderBottomColor: "rgba(0,0,0,0.30)",
                 borderLeftColor:   "rgba(0,0,0,0.12)",
@@ -288,16 +298,11 @@ export default function MapFloatingUI({
             ]}
           >
             <Ionicons
-              name={cameraUnlocked ? "locate" : navigating ? "compass" : "navigate"}
+              name={cameraUnlocked ? "locate" : headingUp ? "compass" : "navigate-circle-outline"}
               size={22}
-              color={cameraUnlocked ? WHITE : navigating ? BLUE : ORANGE}
+              color={(cameraUnlocked || headingUp) ? WHITE : ORANGE}
             />
           </Pressable>
-          
-          {/* Dot indicator: camera is unlocked from user position */}
-          {/* {cameraUnlocked && (
-            <View style={s.unlockedDot} />
-          )} */}
       </View>
       )}
 
@@ -361,7 +366,7 @@ export default function MapFloatingUI({
               },
             ]}
           >
-            <Ionicons name="megaphone-outline" size={22} color={ORANGE} />
+            <Ionicons name="warning-outline" size={22} color={ORANGE} />
           </Pressable>
 
           {/* Recenter/Compass */}

@@ -11,7 +11,6 @@ import {
   StyleSheet,
   Text,
   View,
-  Platform,
   useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,8 +24,11 @@ import ReportSheet from "@/components/app/ReportSheet";
 
 const ORANGE = "#FF6F00";
 const BLACK = "#000000";
-const INACTIVE_BLACK = "#1A1A1A"; 
+const INACTIVE_BLACK = "#1A1A1A";
 const WHITE = "#FFFFFF";
+// Tab bar content height (icon 22dp + label 11dp + gaps + paddingTop 5dp ≈ 49dp).
+// Safe-area bottom is added on top of this at runtime via insets.bottom.
+const TAB_BAR_HEIGHT = 64;
 const { height: SCREEN_H } = Dimensions.get("window");
 
 // ─── Tab Config ───────────────────────────────────────────────────────────────
@@ -189,7 +191,7 @@ function DraggableSheet({
         <ScrollView
           showsVerticalScrollIndicator={false}
           bounces
-          contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + TAB_BAR_HEIGHT }}
         >
           {children}
         </ScrollView>
@@ -218,7 +220,7 @@ function CustomTabBar({
     <View
       style={[
         styles.tabBar,
-        { paddingBottom: Platform.OS === "ios" ? Math.max(insets.bottom - 5, 0) : insets.bottom, backgroundColor: tabBarBg },
+        { paddingBottom: insets.bottom, backgroundColor: tabBarBg },
       ]}
     >
       {TABS.map((tab) => {

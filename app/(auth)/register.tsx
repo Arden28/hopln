@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
+  Animated,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -43,7 +44,20 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [emailOpen, setEmailOpen] = useState(false);
+  const expandAnim = useRef(new Animated.Value(0)).current;
+
   const C = theme(dark);
+
+  const toggleEmail = () => {
+    const opening = !emailOpen;
+    setEmailOpen(opening);
+    Animated.timing(expandAnim, {
+      toValue: opening ? 1 : 0,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+  };
 
   const submit = async () => {
     setError("");
@@ -105,21 +119,6 @@ export default function Register() {
           </Text>
         </View>
 
-        {/* Social first */}
-        <SocialButtons
-          onSuccess={handleSocialSuccess}
-          onNeedsPhone={handleNeedsPhone}
-          onError={setError}
-          disabled={loading}
-        />
-
-        {/* Divider "or with email" */}
-        <View style={styles.dividerRow}>
-          <View style={[styles.line, { backgroundColor: C.inputBd }]} />
-          <Text style={[styles.dividerText, { color: C.textSub }]}>or with email</Text>
-          <View style={[styles.line, { backgroundColor: C.inputBd }]} />
-        </View>
-
         {/* Error */}
         {!!error && (
           <View style={[styles.errorBox, { backgroundColor: C.errBg, borderColor: C.errBd }]}>
@@ -128,86 +127,122 @@ export default function Register() {
           </View>
         )}
 
-        {/* Form */}
-        <View style={styles.form}>
-          <Field label="Full name" value={name} onChangeText={setName} placeholder="e.g. Amara Osei" C={C} />
-          <Field
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@email.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            C={C}
-          />
-          <View style={styles.fieldWrap}>
-            <Text style={[styles.label, { color: C.textSub }]}>Phone number</Text>
-            <View style={[styles.phoneRow, { backgroundColor: C.inputBg, borderColor: C.inputBd }]}>
-              <Pressable
-                style={[styles.countryBadge, { borderRightColor: C.inputBd }]}
-                onPress={() => setShowCountryPicker(true)}
-              >
-                <Text style={styles.flagEmoji}>{selectedCountry.flag}</Text>
-                <Text style={[styles.dialCode, { color: C.text }]}>{selectedCountry.dial}</Text>
-                <Ionicons name="chevron-down" size={12} color={C.textSub} style={{ marginLeft: 2 }} />
-              </Pressable>
-              <TextInput
-                ref={phoneRef}
-                style={[styles.phoneInput, { color: C.text }]}
-                placeholder={selectedCountry.placeholder}
-                placeholderTextColor={C.placeholder}
-                value={phoneInput}
-                onChangeText={setPhoneInput}
-                keyboardType="phone-pad"
-                maxLength={12}
-              />
-            </View>
-          </View>
+        {/* Primary: OAuth */}
+        <SocialButtons
+          showDivider={false}
+          onSuccess={handleSocialSuccess}
+          onNeedsPhone={handleNeedsPhone}
+          onError={setError}
+          disabled={loading}
+        />
 
-          {/* Password */}
-          <View style={styles.fieldWrap}>
-            <Text style={[styles.label, { color: C.textSub }]}>Password</Text>
-            <View style={[styles.pwRow, { backgroundColor: C.inputBg, borderColor: C.inputBd }]}>
-              <TextInput
-                style={[styles.pwInput, { color: C.text }]}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Min. 8 characters"
-                placeholderTextColor={C.placeholder}
-                secureTextEntry={!showPw}
-              />
-              <Pressable onPress={() => setShowPw((v) => !v)} style={styles.eyeBtn}>
-                <Ionicons
-                  name={showPw ? "eye-off-outline" : "eye-outline"}
-                  size={20}
-                  color={C.textSub}
-                />
-              </Pressable>
-            </View>
-          </View>
-
-          <Field
-            label="Confirm password"
-            value={confirm}
-            onChangeText={setConfirm}
-            placeholder="Repeat password"
-            secureTextEntry
-            C={C}
-          />
+        {/* Divider */}
+        <View style={styles.dividerRow}>
+          <View style={[styles.line, { backgroundColor: C.inputBd }]} />
+          <Text style={[styles.dividerText, { color: C.textSub }]}>or</Text>
+          <View style={[styles.line, { backgroundColor: C.inputBd }]} />
         </View>
 
-        {/* Submit */}
-        <Pressable
-          style={[styles.primary, { backgroundColor: C.accent }, loading && styles.btnDisabled]}
-          onPress={submit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.primaryText}>Create account</Text>
-          )}
+        {/* Email toggle */}
+        <Pressable onPress={toggleEmail} style={styles.emailToggle}>
+          <Ionicons name="mail-outline" size={17} color={C.accent} />
+          <Text style={[styles.emailToggleText, { color: C.accent }]}>Sign up with email</Text>
+          <Animated.View style={{
+            transform: [{
+              rotate: expandAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] }),
+            }],
+          }}>
+            <Ionicons name="chevron-forward" size={15} color={C.accent} />
+          </Animated.View>
         </Pressable>
+
+        {/* Expandable form */}
+        <Animated.View
+          style={{
+            maxHeight: expandAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 700] }),
+            opacity: expandAnim,
+            overflow: "hidden",
+          }}
+          pointerEvents={emailOpen ? "auto" : "none"}
+        >
+          <View style={styles.form}>
+            <Field label="Full name" value={name} onChangeText={setName} placeholder="e.g. Amara Osei" C={C} />
+            <Field
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@email.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              C={C}
+            />
+            <View style={styles.fieldWrap}>
+              <Text style={[styles.label, { color: C.textSub }]}>Phone number</Text>
+              <View style={[styles.phoneRow, { backgroundColor: C.inputBg, borderColor: C.inputBd }]}>
+                <Pressable
+                  style={[styles.countryBadge, { borderRightColor: C.inputBd }]}
+                  onPress={() => setShowCountryPicker(true)}
+                >
+                  <Text style={styles.flagEmoji}>{selectedCountry.flag}</Text>
+                  <Text style={[styles.dialCode, { color: C.text }]}>{selectedCountry.dial}</Text>
+                  <Ionicons name="chevron-down" size={12} color={C.textSub} style={{ marginLeft: 2 }} />
+                </Pressable>
+                <TextInput
+                  ref={phoneRef}
+                  style={[styles.phoneInput, { color: C.text }]}
+                  placeholder={selectedCountry.placeholder}
+                  placeholderTextColor={C.placeholder}
+                  value={phoneInput}
+                  onChangeText={setPhoneInput}
+                  keyboardType="phone-pad"
+                  maxLength={12}
+                />
+              </View>
+            </View>
+
+            <View style={styles.fieldWrap}>
+              <Text style={[styles.label, { color: C.textSub }]}>Password</Text>
+              <View style={[styles.pwRow, { backgroundColor: C.inputBg, borderColor: C.inputBd }]}>
+                <TextInput
+                  style={[styles.pwInput, { color: C.text }]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Min. 8 characters"
+                  placeholderTextColor={C.placeholder}
+                  secureTextEntry={!showPw}
+                />
+                <Pressable onPress={() => setShowPw((v) => !v)} style={styles.eyeBtn}>
+                  <Ionicons
+                    name={showPw ? "eye-off-outline" : "eye-outline"}
+                    size={20}
+                    color={C.textSub}
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            <Field
+              label="Confirm password"
+              value={confirm}
+              onChangeText={setConfirm}
+              placeholder="Repeat password"
+              secureTextEntry
+              C={C}
+            />
+
+            <Pressable
+              style={[styles.primary, { backgroundColor: C.accent }, loading && styles.btnDisabled]}
+              onPress={submit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.primaryText}>Create account</Text>
+              )}
+            </Pressable>
+          </View>
+        </Animated.View>
 
         {/* Footer */}
         <View style={styles.footer}>
@@ -277,12 +312,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  header: { gap: 6 },
-  title: { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
-  subtitle: { fontSize: 15, lineHeight: 22 },
-  dividerRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  line: { flex: 1, height: 1 },
-  dividerText: { fontSize: 13 },
+  header:    { gap: 6 },
+  title:     { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
+  subtitle:  { fontSize: 15, lineHeight: 22 },
   errorBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -292,9 +324,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   errorText: { flex: 1, fontSize: 14 },
-  form: { gap: 16 },
+
+  dividerRow:  { flexDirection: "row", alignItems: "center", gap: 12 },
+  line:        { flex: 1, height: 1 },
+  dividerText: { fontSize: 13 },
+
+  emailToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 4,
+  },
+  emailToggleText: { fontSize: 15, fontWeight: "600" },
+
+  form:      { gap: 16, paddingTop: 4 },
   fieldWrap: { gap: 8 },
-  label: { fontSize: 13, fontWeight: "500" },
+  label:     { fontSize: 13, fontWeight: "500" },
   input: {
     height: 52,
     borderRadius: 14,
@@ -329,8 +375,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     paddingLeft: 16,
   },
-  pwInput: { flex: 1, fontSize: 15 },
-  eyeBtn: { paddingHorizontal: 14, height: "100%", justifyContent: "center" },
+  pwInput:  { flex: 1, fontSize: 15 },
+  eyeBtn:   { paddingHorizontal: 14, height: "100%", justifyContent: "center" },
   primary: {
     height: 56,
     borderRadius: 16,
@@ -339,7 +385,7 @@ const styles = StyleSheet.create({
   },
   primaryText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
   btnDisabled: { opacity: 0.55 },
-  footer: { flexDirection: "row", justifyContent: "center" },
-  footerText: { fontSize: 14 },
-  link: { fontSize: 14, fontWeight: "600" },
+  footer:      { flexDirection: "row", justifyContent: "center" },
+  footerText:  { fontSize: 14 },
+  link:        { fontSize: 14, fontWeight: "600" },
 });

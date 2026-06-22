@@ -3,6 +3,7 @@ import { IntermStopInfoCard }    from "@/components/map/IntermStopInfoCard";
 import { MapLayersSheet }        from "@/components/map/MapLayersSheet";
 import { OfflineNotice }         from "@/components/map/OfflineNotice";
 import { ReportLayer }           from "@/components/map/ReportLayer";
+import type { ReportLayerHandle } from "@/components/map/ReportLayer";
 import { RouteOverlay }          from "@/components/map/RouteOverlay";
 import { SaveWall }              from "@/components/map/SaveWall";
 import { NavIndicator }           from "@/components/map/NavIndicator";
@@ -165,6 +166,11 @@ export default function MapScreen() {
   const headingUpRef = useRef(headingUp);
   useEffect(() => { headingUpRef.current = headingUp; }, [headingUp]);
 
+  // prefs.navView (flat vs tilted pitch) in a ref so mid-navigation preference
+  // changes take effect immediately without restarting the camera interval.
+  const navViewRef = useRef(prefs.navView);
+  useEffect(() => { navViewRef.current = prefs.navView; }, [prefs.navView]);
+
   // Live compass bearing (works at rest) → drives the heading beam + nav camera.
   useHeadingTracker();
 
@@ -178,10 +184,20 @@ export default function MapScreen() {
   const reportFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reportReqId      = useRef(0);
 
-  // Region "version" bumped on every onRegionChange (pan/zoom/nav animation).
-  // The ReportLayer overlay reads this ref to re-project its pins to screen
-  // space — bumping a ref (not state) means the map subtree never re-renders.
-  const regionVersionRef = useRef(0);
+  const reportLayerRef      = useRef<ReportLayerHandle>(null);
+  const lastProjectCallRef  = useRef(0);
+  // True while a user pan/pinch gesture is in progress. The nav camera interval
+  // skips animateTo when this is set so it never fights an active gesture.
+  const isUserGesturingRef  = useRef(false);
+  // Tracks the last settled camera region so onRegionChangeComplete can distinguish
+  // a pinch-zoom gesture (zoom changes, centre barely moves) from a pan (centre moves).
+  // Updated on ALL region settlements — both programmatic and gesture — so the
+  // baseline is always fresh and the null-prev edge case can't occur mid-navigation.
+  const prevRegionRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+  // Reset baseline whenever navigation starts/stops so a stale explore-mode zoom
+  // level doesn't pollute the first gesture comparison in nav mode.
+  useEffect(() => { prevRegionRef.current = null; }, [navigating]);
+
   // Last computed viewport bounds — reused to refetch reports the instant the
   // Reports layer is toggled on, without waiting for the next pan.
   const lastBoundsRef    = useRef<{ north: number; south: number; east: number; west: number } | null>(null);
@@ -293,6 +309,9 @@ export default function MapScreen() {
     const id = setInterval(() => {
       const pos = meRef.current;
       if (!pos) return;
+      // Don't fight an active user gesture — let it settle, then onRegionChangeComplete
+      // will clear this flag and (if it was a pan) set followMe=false.
+      if (isUserGesturingRef.current) return;
 
       const vehicleMode = isVehicleModeRef.current;
       const speed       = pos.speed ?? 0;
@@ -346,39 +365,43 @@ export default function MapScreen() {
       // and subtracting that from the forward offset — placing the dot in the
       // centre of the visible area above the sheet on every device.
       const mpp = (Math.cos(pos.latitude * Math.PI / 180) * 156543) / Math.pow(2, finalZoom);
-      const sheetCompM  = Math.min(100, 155 * mpp); // 155 px = half sheet height
-      const desiredFwdM = vehicleMode ? 80 : 50;
-      const netOffsetM  = desiredFwdM - sheetCompM;  // negative = camera behind user
+      const sheetCompM = Math.min(100, 155 * mpp); // 155 px ≈ half sheet height
+      // Vehicle: place dot at 70% screen height (SH*0.20 px below map centre).
+      // Walk: fixed 50 m forward offset minus sheet compensation.
+      const netOffsetM = vehicleMode ? SH * 0.20 * mpp : 50 - sheetCompM;
 
       const hRad      = (committed * Math.PI) / 180;
       const cosLat    = Math.cos(pos.latitude * Math.PI / 180);
       const offsetDeg = netOffsetM / 111_320;
-      const centerLat = pos.latitude  + offsetDeg * Math.cos(hRad);
-      const centerLng = pos.longitude + offsetDeg * Math.sin(hRad) / cosLat;
+      // In north-up mode the camera always offsets due north (camHRad=0) so phone
+      // rotation never moves the map center. Heading-up offsets in travel direction.
+      const camHRad   = headingUpRef.current ? hRad : 0;
+      const centerLat = pos.latitude  + offsetDeg * Math.cos(camHRad);
+      const centerLng = pos.longitude + offsetDeg * Math.sin(camHRad) / cosLat;
 
-      const pitch = prefs.navView === "tilted" ? (vehicleMode ? 60 : 45) : 0;
+      const pitch = navViewRef.current === "tilted" ? (vehicleMode ? 60 : 45) : 0;
 
       // Heading: committed (heading-up) or 0 (north-up, default).
       // Only push to camera when the change exceeds 2° to prevent micro-animation
       // churn that produces the brief "double render" artifact on Android.
       const targetHeading = headingUpRef.current ? committed : 0;
       const hdgDelta = Math.abs(((targetHeading - lastSentHdgRef.current + 540) % 360) - 180);
-      const sendHdg  = hdgDelta >= 2.0;
+      // Dead-zone thresholds:
+      //   heading-up: 1° — user wants real-time map rotation; 5° increments feel jerky
+      //   vehicle:    2° — fast movement gives reliable GPS heading; tight threshold is fine
+      //   walk:       5° — GPS heading is noisy at low speed; wider gate prevents jitter
+      // In heading-up mode send heading even at rest (compass tracks direction without moving).
+      // In north-up mode targetHeading is always 0, so this rarely sends anything.
+      const hdgThreshold = headingUpRef.current ? 1.0 : (vehicleMode ? 2.0 : 5.0);
+      const sendHdg = hdgDelta >= hdgThreshold && (headingUpRef.current || speed >= 0.5);
       if (sendHdg) lastSentHdgRef.current = targetHeading;
 
-      // Synchronous NavIndicator position — computed from the same mpp + offset
-      // used for the camera center, so the dot has zero async lag.
-      // In heading-up mode the map rotates so user is always straight below center;
-      // in north-up mode we project the heading vector onto screen axes.
+      // NavIndicator position: in both north-up and heading-up modes the user is
+      // directly below the camera center (camera is always offset "forward" from user),
+      // so the dot is always at horizontal center, pixelsBehind below map centre.
       const pitchFactor  = Math.cos((pitch * Math.PI) / 180);
       const pixelsBehind = (netOffsetM / mpp) * pitchFactor;
-      const userScreenX  = headingUpRef.current
-        ? SW / 2
-        : SW / 2 - pixelsBehind * Math.sin(hRad);
-      const userScreenY  = headingUpRef.current
-        ? SH / 2 + pixelsBehind
-        : SH / 2 + pixelsBehind * Math.cos(hRad);
-      setNavIndicatorPos({ x: userScreenX, y: userScreenY });
+      setNavIndicatorPos({ x: SW / 2, y: SH / 2 + pixelsBehind });
 
       camera.animateTo({
         center:   { latitude: centerLat, longitude: centerLng },
@@ -390,7 +413,7 @@ export default function MapScreen() {
     }, 130); // ~7.7 Hz — 50 ms gap after each 80 ms animation prevents overlap
 
     return () => clearInterval(id);
-  }, [navigating, followMe, camera, prefs.navView]);
+  }, [navigating, followMe, camera]); // prefs.navView via navViewRef — no interval restart needed
 
   // ── Auto-start navigation for AI-derived journeys ─────────────────────────────
 
@@ -510,21 +533,47 @@ export default function MapScreen() {
     []
   );
 
-  // Fires continuously while the map moves (gesture + programmatic nav camera).
-  // Bumping a ref re-projects the ReportLayer pins without re-rendering the map.
-  const handleRegionChange = useCallback(() => {
-    regionVersionRef.current += 1;
+  // Fires continuously during pan/zoom. We use the isGesture flag to set
+  // isUserGesturingRef immediately — this pauses the nav camera interval so it
+  // never fights an in-progress user gesture. onRegionChangeComplete clears it.
+  const handleRegionChange = useCallback((_region: any, details: any) => {
+    if (details?.isGesture) isUserGesturingRef.current = true;
+    const now = Date.now();
+    if (now - lastProjectCallRef.current >= 50) {
+      lastProjectCallRef.current = now;
+      reportLayerRef.current?.project();
+    }
   }, []);
 
   const onRegionChangeComplete = useCallback(async (region: any, details: any) => {
-    if (details?.isGesture) setFollowMe(false);
+    const newZoom = zoomFromDelta(region.latitudeDelta);
+    if (details?.isGesture) {
+      // Gesture is done — clear the guard so the nav interval can resume.
+      isUserGesturingRef.current = false;
+      const prev = prevRegionRef.current;
+      if (navigating && prev) {
+        // Nav mode: pinch-zoom (zoom changes, centre barely moves) keeps follow.
+        // Pan (centre moves) disables follow so the user can freely explore.
+        const isPinch = Math.abs(newZoom - prev.zoom) > 0.3
+          && Math.abs(region.latitude  - prev.lat) < 0.0003
+          && Math.abs(region.longitude - prev.lng) < 0.0003;
+        if (!isPinch) setFollowMe(false);
+      } else {
+        // Explore mode or no baseline yet: any gesture breaks follow.
+        setFollowMe(false);
+      }
+    }
+    // Always update the baseline — programmatic camera movements (the nav interval's
+    // animateTo calls) will keep prevRegionRef current so the first user gesture
+    // after re-locking always has an accurate reference to compare against.
+    prevRegionRef.current = { lat: region.latitude, lng: region.longitude, zoom: newZoom };
     try {
       const cam = await mapRef.current?.getCamera();
       if (cam?.heading != null) setCameraHeading(cam.heading);
     } catch { /* map not ready */ }
     setViewZoom(zoomFromDelta(region.latitudeDelta));
     setViewCenter({ lat: region.latitude, lng: region.longitude });
-    regionVersionRef.current += 1; // ensure pins re-project on settle
+    reportLayerRef.current?.project();
 
     const north = region.latitude  + region.latitudeDelta  / 2;
     const south = region.latitude  - region.latitudeDelta  / 2;
@@ -538,7 +587,7 @@ export default function MapScreen() {
       () => fetchReportsForBounds(north, south, east, west),
       400
     );
-  }, [fetchReportsForBounds]);
+  }, [navigating, fetchReportsForBounds]);
 
   // Toggling the Reports layer on refetches immediately for the current
   // viewport so pins appear without the user having to pan the map.
@@ -666,6 +715,7 @@ export default function MapScreen() {
           currentWalkLegIdx={currentWalkLegIdx}
           userLat={meLat ?? undefined}
           userLng={meLng ?? undefined}
+          viewZoom={viewZoom}
         />
 
         {longPressCoord && !activeJourney && (
@@ -694,9 +744,9 @@ export default function MapScreen() {
           Positions are projected from lat/lng via mapRef.pointForCoordinate. */}
       {layers.reports && (
         <ReportLayer
+          ref={reportLayerRef}
           reports={activeReports}
           mapRef={mapRef}
-          regionVersionRef={regionVersionRef}
           onPress={handleReportPress}
         />
       )}
@@ -711,7 +761,7 @@ export default function MapScreen() {
           mapRef={mapRef}
           navigating={navigating}
           isVehicleMode={isVehicleMode}
-          fixedPos={navigating ? navIndicatorPos : undefined}
+          fixedPos={navigating && followMe ? navIndicatorPos ?? undefined : undefined}
           headingUp={headingUp}
         />
       )}
@@ -781,6 +831,7 @@ export default function MapScreen() {
         approachPhase={navState?.approachPhase ?? null}
         cameraHeading={cameraHeading}
         onResetNorth={handleCompassPress}
+        headingUp={headingUp}
         stepEta={stepEta}
         walkInstruction={walkInstruction}
         walkDestination={walkDestination}
@@ -837,7 +888,7 @@ export default function MapScreen() {
       )}
 
       {activeJourney && (
-        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin} isSaved={isSaved} onSave={handleSaveJourney} onUnsave={handleUnsaveJourney} scrollRef={stepsScrollRef}>
+        <JourneyDetailsSheet activeJourney={activeJourney} routeLoading={routeLoading} routeInfo={routeInfo} navigating={navigating} onToggleNav={handleToggleNav} onClose={handleClearJourney} mToNice={mToNice} sToMin={sToMin} isSaved={isSaved} onSave={handleSaveJourney} onUnsave={handleUnsaveJourney} scrollRef={stepsScrollRef} eta={navState?.eta ?? null} remainingDistanceM={navState?.remainingDistanceM ?? null}>
           <RouteStepsList steps={steps} nextStepIdx={navState?.stepIndex ?? 0} navigating={navigating} selectedName={activeJourney.toLoc.name} stopsRemaining={navState?.stopsRemaining ?? null} stepETAs={navState?.stepETAs} scrollRef={stepsScrollRef} />
         </JourneyDetailsSheet>
       )}

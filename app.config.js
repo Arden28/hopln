@@ -34,14 +34,22 @@ module.exports = {
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "",
       },
       infoPlist: {
-        NSLocationWhenInUseUsageDescription: "We use your location to show nearby stages.",
-        NSLocationAlwaysAndWhenInUseUsageDescription: "We use your location to show nearby stages.",
-        NSLocationAlwaysUsageDescription: "We use your location to show nearby stages.",
+        NSLocationWhenInUseUsageDescription: "Navigo uses your location to show nearby transit stops, plan routes, and display your position on the map.",
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Navigo uses your location in the background to track your journey, announce upcoming stops, and alert you when to board or alight, even when the app is not on screen.",
+        NSLocationAlwaysUsageDescription: "Navigo uses your location in the background to track your journey, announce upcoming stops, and alert you when to board or alight, even when the app is not on screen.",
         NSCameraUsageDescription: "Allow $(PRODUCT_NAME) to use your camera to take transit stop photos and update your profile picture.",
         NSPhotoLibraryUsageDescription: "Allow $(PRODUCT_NAME) to access your photo library to upload stop photos and choose a profile picture.",
         NSPhotoLibraryAddUsageDescription: "Allow $(PRODUCT_NAME) to save photos to your library.",
         ITSAppUsesNonExemptEncryption: false,
-        UIBackgroundModes: ["location", "remote-notification"],
+        UIBackgroundModes: ["location", "remote-notification", "audio"],
+        NSMicrophoneUsageDescription: "Navigo uses your microphone so you can speak your destination to the built-in AI trip-planning assistant.",
+        NSSpeechRecognitionUsageDescription: "Navigo transcribes your voice so the AI assistant can understand your destination and plan your matatu journey.",
+        // Lock iPad to portrait — orientation:"portrait" only sets the phone key.
+        // Without this, supportsTablet:true lets iPads rotate freely.
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+        ],
       },
     },
 
@@ -82,7 +90,10 @@ module.exports = {
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
         "POST_NOTIFICATIONS",
+        "VIBRATE",
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "READ_EXTERNAL_STORAGE",

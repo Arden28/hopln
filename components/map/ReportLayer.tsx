@@ -14,10 +14,14 @@
 // via mapRef.pointForCoordinate(). pointForCoordinate is asked of the native
 // map, so it is correct under any pan / zoom / rotation / tilt. This is the
 // same strategy NavIndicator uses for the user-location dot.
+//
+// Projection strategy: instead of a 20 Hz setInterval, the parent calls
+// ref.project() from onRegionChangeComplete (once per settled pan/zoom). This
+// eliminates idle CPU and gives exact timing.
 
 import type { TransitReport } from "@/services/report";
 import { Ionicons } from "@expo/vector-icons";
-import React, { memo, useEffect, useMemo, useState } from "react";
+import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import type MapView from "react-native-maps";
 
@@ -72,89 +76,69 @@ function clusterReports(reports: TransitReport[]): Group[] {
 
 // ── Overlay ───────────────────────────────────────────────────────────────────
 
-interface ReportLayerProps {
-  reports:          TransitReport[];
-  mapRef:           React.RefObject<MapView | null>;
-  /** Bumped by the parent on every onRegionChange so we re-project pins. */
-  regionVersionRef: React.MutableRefObject<number>;
-  onPress:          (report: TransitReport, count: number) => void;
+export interface ReportLayerHandle {
+  /** Re-project all pins to current screen coordinates. Call from onRegionChangeComplete. */
+  project(): void;
 }
 
-export const ReportLayer = memo(function ReportLayer({
-  reports,
-  mapRef,
-  regionVersionRef,
-  onPress,
-}: ReportLayerProps) {
-  const groups = useMemo(() => clusterReports(reports), [reports]);
-  const [positions, setPositions] = useState<({ x: number; y: number } | null)[]>([]);
+interface ReportLayerProps {
+  reports:  TransitReport[];
+  mapRef:   React.RefObject<MapView | null>;
+  onPress:  (report: TransitReport, count: number) => void;
+}
 
-  // Re-project all pins whenever the map region changes (tracked via a ref the
-  // parent increments on onRegionChange — no parent re-render). A 50 ms tick
-  // with a busy-guard and an idle short-circuit keeps this cheap: when the map
-  // is still, the tick compares one integer and returns immediately.
-  useEffect(() => {
-    let cancelled = false;
-    let busy      = false;
-    let lastVer   = -1;
+export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
+  function ReportLayer({ reports, mapRef, onPress }, ref) {
+    const groups = useMemo(() => clusterReports(reports), [reports]);
+    const [positions, setPositions] = useState<({ x: number; y: number } | null)[]>([]);
 
-    const project = async () => {
-      if (cancelled || busy) return;
+    const project = useCallback(async () => {
       const map = mapRef.current;
-      if (!map) return;
-      if (groups.length === 0) return;
-
-      const ver = regionVersionRef.current;
-      if (ver === lastVer) return; // map hasn't moved since last projection
-
-      busy = true;
-      try {
-        const pts = await Promise.all(
-          groups.map((g) =>
-            map
-              .pointForCoordinate({ latitude: g.primary.lat, longitude: g.primary.lng })
-              .then((p) => p as { x: number; y: number })
-              .catch(() => null)
-          )
-        );
-        if (cancelled) return;
-        setPositions(pts);
-        // Only mark this region version done if every point resolved; otherwise
-        // retry next tick (map may not have been ready yet).
-        if (pts.every((p) => p != null)) lastVer = ver;
-      } finally {
-        busy = false;
+      if (!map || groups.length === 0) {
+        setPositions([]);
+        return;
       }
-    };
+      const pts = await Promise.all(
+        groups.map((g) =>
+          map
+            .pointForCoordinate({ latitude: g.primary.lat, longitude: g.primary.lng })
+            .then((p) => p as { x: number; y: number })
+            .catch(() => null)
+        )
+      );
+      setPositions(pts);
+    }, [groups, mapRef]);
 
-    project();
-    const id = setInterval(project, 50);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [groups, mapRef, regionVersionRef]);
+    // Expose project() so map.tsx can call it from onRegionChangeComplete.
+    useImperativeHandle(ref, () => ({ project }), [project]);
 
-  if (groups.length === 0) return null;
+    // Re-project when report data changes (new fetch, filter toggle, etc.).
+    useEffect(() => { project(); }, [project]);
 
-  return (
-    // box-none: the container never intercepts touches; only the pins do, so the
-    // map stays fully pannable in the gaps between pins.
-    <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      {groups.map((g, i) => {
-        const p = positions[i];
-        if (!p) return null;
-        return (
-          <ReportPin
-            key={g.primary.id}
-            x={p.x}
-            y={p.y}
-            type={g.primary.type}
-            count={g.count}
-            onPress={() => onPress(g.primary, g.count)}
-          />
-        );
-      })}
-    </View>
-  );
-});
+    if (groups.length === 0) return null;
+
+    return (
+      // box-none: the container never intercepts touches; only the pins do, so the
+      // map stays fully pannable in the gaps between pins.
+      <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+        {groups.map((g, i) => {
+          const p = positions[i];
+          if (!p) return null;
+          return (
+            <ReportPin
+              key={g.primary.id}
+              x={p.x}
+              y={p.y}
+              type={g.primary.type}
+              count={g.count}
+              onPress={() => onPress(g.primary, g.count)}
+            />
+          );
+        })}
+      </View>
+    );
+  }
+));
 
 // ── Single pin ────────────────────────────────────────────────────────────────
 

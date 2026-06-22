@@ -81,7 +81,9 @@ export const VoiceGuide = {
     navHints:            NavHints,
   ): string | null {
     if (!phase || !step || navHints === "off") return null;
-    // concise = imminent only; detailed = all three phases
+    // preview is a silent holding state — announcement fires when entering "far" at ~500 m
+    if (phase === "preview") return null;
+    // concise = imminent only; detailed = far + near + imminent
     if (navHints === "concise" && phase !== "imminent") return null;
 
     const instruction = step.instruction ?? "Continue";

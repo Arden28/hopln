@@ -52,7 +52,7 @@ export function useNavigation() {
   const watchRef    = useRef<Location.LocationSubscription | null>(null);
   const interpRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const meSmoothRef = useRef<Coords | null>(null);
-  // Last position actually displayed (may be route-snapped); used as interpolation origin.
+  // Last confirmed GPS position; used as the dead-reckoning origin between fixes.
   const meSnapRef   = useRef<Coords | null>(null);
 
   // Refs so GPS watcher closures always read the latest values without re-mounting.
@@ -213,7 +213,7 @@ export function useNavigation() {
 
     const smoothed = { latitude: lat, longitude: lng, heading, speed };
     meSmoothRef.current = smoothed;
-    meSnapRef.current   = smoothed; // default: raw GPS; overwritten by route-snap below if on-route
+    meSnapRef.current   = smoothed; // raw EMA GPS — dead-reckoning origin
     setLocation(smoothed);
     lastGpsTimeRef.current = Date.now();
     lastSpeedRef.current   = smoothed.speed ?? 0;
@@ -315,16 +315,10 @@ export function useNavigation() {
       setNavState(result);
       if (result.status === "arrived") useJourneyStore.getState().setTripStatus("ARRIVED");
 
-      // Route-snap: when the user is within 45 m of the polyline, shift the displayed dot
-      // onto the road surface. Blend zone 30–45 m avoids jarring jumps on re-entry.
-      if (result.projectedPoint && result.distanceFromRouteM < 45) {
-        const blend   = Math.min(1.0, Math.max(0, (45 - result.distanceFromRouteM) / 15));
-        const snapLat = smoothed.latitude  + blend * (result.projectedPoint.latitude  - smoothed.latitude);
-        const snapLng = smoothed.longitude + blend * (result.projectedPoint.longitude - smoothed.longitude);
-        const snapPos = { ...smoothed, latitude: snapLat, longitude: snapLng };
-        meSnapRef.current = snapPos;
-        setLocation(snapPos);
-      }
+      // Route-snap disabled: the dot shows the user's true GPS position, not a
+      // position blended onto the polyline. The engine still projects internally
+      // for step-advance / off-route detection — we just don't move the dot.
+      // meSnapRef stays as the raw smoothed GPS set on line above.
 
       if (navHints === "detailed" && result.currentStopName &&
           result.currentStopName !== lastAnnouncedStopRef.current) {

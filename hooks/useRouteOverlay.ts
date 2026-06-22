@@ -5,7 +5,7 @@ import type { Route } from "@/services/route";
 import type { RouteInfo, Step } from "@/utils/mapHelpers";
 import { detectManeuver } from "@/utils/mapHelpers";
 import type { LatLng } from "@/providers/map/types";
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useRef } from "react";
 
 type ActiveJourney = {
   fromLoc: UnifiedLocation;
@@ -29,40 +29,59 @@ interface RouteOverlayResult {
   routeLoading:      boolean;
 }
 
+// ── Reducer ───────────────────────────────────────────────────────────────────
+
+type RouteState = RouteOverlayResult;
+
+type RouteAction =
+  | { type: 'SET_ALL';     payload: Omit<RouteState, 'routeLoading'> }
+  | { type: 'SET_LOADING'; loading: boolean }
+  | { type: 'RESET' };
+
+const INITIAL_STATE: RouteState = {
+  walkLegs:          [],
+  transitLegs:       [],
+  nodeMarkers:       [],
+  locMarkers:        [],
+  intermediateStops: [],
+  steps:             [],
+  routeInfo:         null,
+  routeLoading:      false,
+};
+
+function routeReducer(state: RouteState, action: RouteAction): RouteState {
+  switch (action.type) {
+    case 'RESET':       return INITIAL_STATE;
+    case 'SET_LOADING': return { ...state, routeLoading: action.loading };
+    case 'SET_ALL':     return { ...action.payload, routeLoading: false };
+  }
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
+
 export function useRouteOverlay(
   activeJourney: ActiveJourney,
   camera: Camera,
 ): RouteOverlayResult {
-  const [walkLegs,          setWalkLegs]          = useState<WalkLeg[]>([]);
-  const [transitLegs,       setTransitLegs]       = useState<TransitLeg[]>([]);
-  const [nodeMarkers,       setNodeMarkers]       = useState<NodeMarker[]>([]);
-  const [locMarkers,        setLocMarkers]        = useState<LocMarker[]>([]);
-  const [intermediateStops, setIntermediateStops] = useState<IntermediateStop[]>([]);
-  const [steps,             setSteps]             = useState<Step[]>([]);
-  const [routeInfo,         setRouteInfo]         = useState<RouteInfo | null>(null);
-  const [routeLoading,      setRouteLoading]      = useState(false);
+  const [state, dispatch] = useReducer(routeReducer, INITIAL_STATE);
+
+  // Keep a stable ref so build() can call fitCoordinates without being in the dep array.
+  const cameraRef = useRef(camera);
+  useEffect(() => { cameraRef.current = camera; }, [camera]);
 
   useEffect(() => {
     if (!activeJourney) {
-      setWalkLegs([]);
-      setTransitLegs([]);
-      setNodeMarkers([]);
-      setLocMarkers([]);
-      setIntermediateStops([]);
-      setSteps([]);
-      setRouteInfo(null);
-      setRouteLoading(false);
+      dispatch({ type: 'RESET' });
       return;
     }
 
     // Route hasn't loaded yet (deep-link scenario — useNavigation fetches it async).
-    // Bug fix: return a cleanup so routeLoading clears if the journey is cancelled.
     if (!activeJourney.route) {
-      setRouteLoading(true);
-      return () => setRouteLoading(false);
+      dispatch({ type: 'SET_LOADING', loading: true });
+      return () => dispatch({ type: 'SET_LOADING', loading: false });
     }
 
-    if (!activeJourney.route.is_ai_derived) setRouteLoading(true);
+    if (!activeJourney.route.is_ai_derived) dispatch({ type: 'SET_LOADING', loading: true });
 
     const build = async () => {
       try {
@@ -142,30 +161,35 @@ export function useRouteOverlay(
           }
         }
 
-        setWalkLegs(newWalkLegs);
-        setTransitLegs(newTransitLegs);
-        setNodeMarkers(newNodeMarkers);
-        setLocMarkers(newLocMarkers);
-        setIntermediateStops(newIntermStops);
-        setSteps(summarySteps);
-        setRouteInfo({ distance: route.total_distance, duration: route.total_duration });
+        dispatch({
+          type: 'SET_ALL',
+          payload: {
+            walkLegs:          newWalkLegs,
+            transitLegs:       newTransitLegs,
+            nodeMarkers:       newNodeMarkers,
+            locMarkers:        newLocMarkers,
+            intermediateStops: newIntermStops,
+            steps:             summarySteps,
+            routeInfo:         { distance: route.total_distance, duration: route.total_duration },
+          },
+        });
 
         const firstSegCoords: LatLng[] = segments[0].coordinates
           .map(([lat, lng]) => ({ latitude: lat, longitude: lng }))
           .filter(({ latitude, longitude }) => latitude !== 0 && longitude !== 0 && !isNaN(latitude));
 
         if (firstSegCoords.length > 1) {
-          camera.fitCoordinates(firstSegCoords, { top: 140, right: 40, bottom: 320, left: 40 });
+          cameraRef.current.fitCoordinates(firstSegCoords, { top: 140, right: 40, bottom: 320, left: 40 });
         }
       } catch (err) {
         console.warn("Failed to build journey overlays", err);
       } finally {
-        setRouteLoading(false);
+        dispatch({ type: 'SET_LOADING', loading: false });
       }
     };
 
     build();
-  }, [activeJourney, camera]);
+  }, [activeJourney]); // camera intentionally excluded — accessed via cameraRef
 
-  return { walkLegs, transitLegs, nodeMarkers, locMarkers, intermediateStops, steps, routeInfo, routeLoading };
+  return state;
 }
