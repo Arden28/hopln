@@ -1,7 +1,7 @@
 import React from "react";
+import Mapbox from "@rnmapbox/maps";
 import type { IntermediateStop, LocMarker, NodeMarker, TransitLeg, WalkLeg } from "@/components/map/types";
 import { DestinationPin, IntermediateStopDot, SquarePin, TrackedNodeMarker } from "@/components/map/RouteMarkers";
-import { Marker, Polyline } from "react-native-maps";
 
 function hexWithAlpha(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -11,7 +11,6 @@ function hexWithAlpha(hex: string, alpha: number): string {
 }
 
 // Returns only the coordinates of `coords` that lie AHEAD of the user position.
-// Projects the user onto the nearest segment, then discards everything behind.
 function trimPolylineAhead(
   coords: { latitude: number; longitude: number }[],
   userLat: number,
@@ -49,11 +48,9 @@ interface RouteOverlayProps {
   onIntermStopPress:  (stop: IntermediateStop) => void;
   boardingNodeId?:    string | null;
   currentStepIndex?:  number;
-  // Walking leg consumption: -1 = not walking, ≥0 = index of the active walk leg
   currentWalkLegIdx?: number;
   userLat?:           number;
   userLng?:           number;
-  /** Current map zoom level — intermediate stop dots are hidden below zoom 14. */
   viewZoom?:          number;
 }
 
@@ -63,84 +60,100 @@ function _RouteOverlay({
 }: RouteOverlayProps) {
   return (
     <>
-      {/* Walking route legs — dashed grey, below transit.
-          During navigation:
-            i < currentWalkLegIdx → already walked, shown faded (20 % opacity).
-            i === currentWalkLegIdx → active leg, trimmed from user position.
-            i > currentWalkLegIdx → upcoming, shown at full opacity. */}
+      {/* Walking route legs — dashed grey */}
       {walkLegs.map((leg, i) => {
-        const isActive  = currentWalkLegIdx >= 0 && i === currentWalkLegIdx;
-        const isPast    = currentWalkLegIdx >= 0 && i  < currentWalkLegIdx;
-        const color     = isPast ? hexWithAlpha("#8E8E93", 0.20) : "#8E8E93";
-        const coords    = isActive && userLat != null && userLng != null
+        const isActive = currentWalkLegIdx >= 0 && i === currentWalkLegIdx;
+        const isPast   = currentWalkLegIdx >= 0 && i  < currentWalkLegIdx;
+        const color    = isPast ? hexWithAlpha("#8E8E93", 0.20) : "#8E8E93";
+        const rawCoords = isActive && userLat != null && userLng != null
           ? trimPolylineAhead(leg.coords, userLat, userLng)
           : leg.coords;
 
-        if (coords.length < 2) return null;
+        if (rawCoords.length < 2) return null;
+
+        const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: rawCoords.map((c) => [c.longitude, c.latitude]),
+          },
+          properties: {},
+        };
 
         return (
-          <Polyline
-            key={leg.id}
-            coordinates={coords}
-            strokeColor={color}
-            strokeWidth={3}
-            lineDashPattern={isPast ? undefined : [6, 5]}
-            zIndex={1}
-          />
+          <Mapbox.ShapeSource key={leg.id} id={`walk-src-${leg.id}`} shape={geojson}>
+            <Mapbox.LineLayer
+              id={`walk-line-${leg.id}`}
+              style={{
+                lineColor:   color,
+                lineWidth:   3,
+                lineDasharray: isPast ? undefined : [6, 5],
+                lineCap:     "round",
+                lineJoin:    "round",
+              }}
+            />
+          </Mapbox.ShapeSource>
         );
       })}
 
-      {/* Transit route legs — solid, route-coloured.
-          Traveled legs (index < currentStepIndex) are re-rendered at 28% opacity
-          to show progress. strokeColors forces correct color on PROVIDER_GOOGLE Android. */}
+      {/* Transit route legs — solid, route-coloured */}
       {transitLegs.map((leg, i) => {
         const traveled = currentStepIndex != null && i < currentStepIndex;
         const color = traveled ? hexWithAlpha(leg.color, 0.28) : leg.color;
+
+        const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: leg.coords.map((c) => [c.longitude, c.latitude]),
+          },
+          properties: {},
+        };
+
         return (
-          <Polyline
-            key={`${leg.id}-${leg.color}`}
-            coordinates={leg.coords}
-            strokeColor={color}
-            strokeColors={[color, color]}
-            strokeWidth={traveled ? 4 : 8}
-            zIndex={traveled ? 1 : 2}
-            geodesic
-          />
+          <Mapbox.ShapeSource key={`${leg.id}-${leg.color}`} id={`transit-src-${leg.id}`} shape={geojson}>
+            <Mapbox.LineLayer
+              id={`transit-line-${leg.id}`}
+              style={{
+                lineColor:  color,
+                lineWidth:  traveled ? 4 : 8,
+                lineCap:    "round",
+                lineJoin:   "round",
+              }}
+            />
+          </Mapbox.ShapeSource>
         );
       })}
 
-      {/* Intermediate stops — small route-coloured dots between board and alight.
-          Hidden below zoom 14 where they visually collide. */}
+      {/* Intermediate stop dots — hidden below zoom 14 */}
       {(viewZoom == null || viewZoom >= 14) && intermediateStops.map((s) => (
-        <Marker
+        <Mapbox.PointAnnotation
           key={s.id}
-          coordinate={s.coord}
-          tracksViewChanges={false}
+          id={s.id}
+          coordinate={[s.coord.longitude, s.coord.latitude]}
           anchor={{ x: 0.5, y: 0.5 }}
-          zIndex={3}
-          onPress={() => onIntermStopPress(s)}
+          onSelected={() => onIntermStopPress(s)}
         >
           <IntermediateStopDot color={s.color} />
-        </Marker>
+        </Mapbox.PointAnnotation>
       ))}
 
-      {/* Board/alight node markers — route-coloured circle with matatu icon */}
+      {/* Board/alight node markers */}
       {nodeMarkers.map((m) => (
         <TrackedNodeMarker key={m.id} m={m} isBoardingStop={m.id === boardingNodeId} />
       ))}
 
-      {/* Origin / destination — branded rounded square */}
+      {/* Origin / destination pins */}
       {locMarkers.map((m) => (
-        <Marker
+        <Mapbox.PointAnnotation
           key={m.id}
-          coordinate={m.coord}
-          tracksViewChanges={false}
-          anchor={m.isStart ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 0.8 }}
+          id={m.id}
+          coordinate={[m.coord.longitude, m.coord.latitude]}
+          anchor={m.isStart ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1.0 }}
         >
           {m.isStart ? <SquarePin isStart /> : <DestinationPin name={m.name} />}
-        </Marker>
+        </Mapbox.PointAnnotation>
       ))}
-
     </>
   );
 }

@@ -137,7 +137,10 @@ module.exports = {
           iosDisplayInForeground: true,
         },
       ],
-      // Deleted the react-native-maps plugin block from here!
+      [
+        "@rnmapbox/maps",
+        { RNMapboxMapsDownloadToken: process.env.RNMAPBOX_MAPS_DOWNLOAD_TOKEN ?? "" },
+      ],
       [
         "expo-splash-screen",
         {

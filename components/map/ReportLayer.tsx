@@ -23,7 +23,7 @@ import type { TransitReport } from "@/services/report";
 import { Ionicons } from "@expo/vector-icons";
 import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import type MapView from "react-native-maps";
+import type { MapView } from "@rnmapbox/maps";
 
 // Must stay in sync with ReportSheet CATS and ReportDetailCard CAT
 const CAT: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
@@ -101,8 +101,8 @@ export const ReportLayer = memo(forwardRef<ReportLayerHandle, ReportLayerProps>(
       const pts = await Promise.all(
         groups.map((g) =>
           map
-            .pointForCoordinate({ latitude: g.primary.lat, longitude: g.primary.lng })
-            .then((p) => p as { x: number; y: number })
+            .getPointInView([g.primary.lng, g.primary.lat])
+            .then(([x, y]) => ({ x, y }))
             .catch(() => null)
         )
       );

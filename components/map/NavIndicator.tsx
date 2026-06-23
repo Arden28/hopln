@@ -16,7 +16,7 @@
 import { useHeadingStore } from "@/store/headingStore";
 import { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import MapView from "react-native-maps";
+import type { MapView } from "@rnmapbox/maps";
 import Svg, {
   Defs,
   Path,
@@ -93,8 +93,8 @@ export function NavIndicator({
       if (!map) return;
       busy = true;
       try {
-        const point = await map.pointForCoordinate({ latitude, longitude });
-        if (!cancelled) setPos(point);
+        const [x, y] = await map.getPointInView([longitude, latitude]);
+        if (!cancelled) setPos({ x, y });
       } catch {
         // Map not yet ready; retries at next tick.
       } finally {

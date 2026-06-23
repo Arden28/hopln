@@ -21,7 +21,7 @@ import StopQuickCard           from "@/components/app/StopQuickCard";
 import StopsLayer              from "@/components/app/StopsLayer";
 
 import { useNavigation }       from "@/hooks/useNavigation";
-import { useMapCamera, zoomFromDelta } from "@/hooks/useMapCamera";
+import { useMapCamera } from "@/hooks/useMapCamera";
 import { useRouteOverlay }     from "@/hooks/useRouteOverlay";
 import { useHeadingTracker }   from "@/hooks/useHeadingTracker";
 import { useHeadingStore }     from "@/store/headingStore";
@@ -37,16 +37,13 @@ import { useNetworkStore }     from "@/store/networkStore";
 import { useOfflineMapStore }  from "@/store/offlineMapStore";
 import { Stop, humanizeStep, mToNice, sToMin } from "@/utils/mapHelpers";
 
-import mapStyle     from "@/lib/map_style.json";
-import mapStyleDark from "@/lib/map_style_dark.json";
-
 import { useRouter }      from "expo-router";
 import { useSavedStore }  from "@/store/savedStore";
 import { usePrefsStore }  from "@/store/prefsStore";
 import { useAuthStore }   from "@/store/authStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE, UrlTile } from "react-native-maps";
+import { MapView as MapboxMapView, Camera as MapboxCamera, RasterSource, RasterLayer, PointAnnotation } from "@rnmapbox/maps";
 import { MapService } from "@/services/map";
 
 const { width: SW, height: SH } = Dimensions.get("window");
@@ -147,8 +144,9 @@ export default function MapScreen() {
   const [longPressCoord, setLongPressCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [longPressName,  setLongPressName]  = useState<string>("Dropped pin");
 
-  const mapRef             = useRef<MapView>(null);
-  const camera             = useMapCamera(mapRef);
+  const mapRef             = useRef<MapboxMapView>(null);
+  const cameraRef          = useRef<MapboxCamera>(null);
+  const camera             = useMapCamera(mapRef, cameraRef);
   const chipJustPressedRef = useRef(false);
   const relockRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks the last heading sent to the camera so we only push heading updates
@@ -506,8 +504,9 @@ export default function MapScreen() {
     }
   }, [navigating, followMe, headingUp, camera]);
 
-  const handleLongPress = useCallback((e: any) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
+  // Mapbox onLongPress passes a GeoJSON feature; coordinates are [lng, lat].
+  const handleLongPress = useCallback((feature: any) => {
+    const [longitude, latitude] = (feature?.geometry?.coordinates as [number, number]) ?? [0, 0];
     setLongPressCoord({ latitude, longitude });
     setLongPressName("Dropped pin");
     MapService.reverseGeocode(latitude, longitude)
@@ -536,8 +535,9 @@ export default function MapScreen() {
   // Fires continuously during pan/zoom. We use the isGesture flag to set
   // isUserGesturingRef immediately — this pauses the nav camera interval so it
   // never fights an in-progress user gesture. onRegionChangeComplete clears it.
-  const handleRegionChange = useCallback((_region: any, details: any) => {
-    if (details?.isGesture) isUserGesturingRef.current = true;
+  // Mapbox onRegionIsChanging — feature.properties.isUserInteraction is the gesture flag.
+  const handleRegionChange = useCallback((feature: any) => {
+    if (feature?.properties?.isUserInteraction) isUserGesturingRef.current = true;
     const now = Date.now();
     if (now - lastProjectCallRef.current >= 50) {
       lastProjectCallRef.current = now;
@@ -545,9 +545,13 @@ export default function MapScreen() {
     }
   }, []);
 
-  const onRegionChangeComplete = useCallback(async (region: any, details: any) => {
-    const newZoom = zoomFromDelta(region.latitudeDelta);
-    if (details?.isGesture) {
+  // Mapbox onRegionDidChange — heading is in feature.properties, no getCamera() needed.
+  const onRegionChangeComplete = useCallback(async (feature: any) => {
+    const [lng, lat] = (feature?.geometry?.coordinates as [number, number]) ?? [DEFAULT_REGION.longitude, DEFAULT_REGION.latitude];
+    const newZoom   = feature?.properties?.zoomLevel   ?? 13;
+    const isGesture = feature?.properties?.isUserInteraction ?? false;
+
+    if (isGesture) {
       // Gesture is done — clear the guard so the nav interval can resume.
       isUserGesturingRef.current = false;
       const prev = prevRegionRef.current;
@@ -555,38 +559,32 @@ export default function MapScreen() {
         // Nav mode: pinch-zoom (zoom changes, centre barely moves) keeps follow.
         // Pan (centre moves) disables follow so the user can freely explore.
         const isPinch = Math.abs(newZoom - prev.zoom) > 0.3
-          && Math.abs(region.latitude  - prev.lat) < 0.0003
-          && Math.abs(region.longitude - prev.lng) < 0.0003;
+          && Math.abs(lat - prev.lat) < 0.0003
+          && Math.abs(lng - prev.lng) < 0.0003;
         if (!isPinch) setFollowMe(false);
       } else {
-        // Explore mode or no baseline yet: any gesture breaks follow.
         setFollowMe(false);
       }
     }
-    // Always update the baseline — programmatic camera movements (the nav interval's
-    // animateTo calls) will keep prevRegionRef current so the first user gesture
-    // after re-locking always has an accurate reference to compare against.
-    prevRegionRef.current = { lat: region.latitude, lng: region.longitude, zoom: newZoom };
-    try {
-      const cam = await mapRef.current?.getCamera();
-      if (cam?.heading != null) setCameraHeading(cam.heading);
-    } catch { /* map not ready */ }
-    setViewZoom(zoomFromDelta(region.latitudeDelta));
-    setViewCenter({ lat: region.latitude, lng: region.longitude });
+    prevRegionRef.current = { lat, lng, zoom: newZoom };
+    if (feature?.properties?.heading != null) setCameraHeading(feature.properties.heading);
+    setViewZoom(newZoom);
+    setViewCenter({ lat, lng });
     reportLayerRef.current?.project();
 
-    const north = region.latitude  + region.latitudeDelta  / 2;
-    const south = region.latitude  - region.latitudeDelta  / 2;
-    const east  = region.longitude + region.longitudeDelta / 2;
-    const west  = region.longitude - region.longitudeDelta / 2;
-    lastBoundsRef.current = { north, south, east, west };
-
-    // Debounce: only the last region after panning settles triggers a fetch.
-    if (reportFetchTimer.current) clearTimeout(reportFetchTimer.current);
-    reportFetchTimer.current = setTimeout(
-      () => fetchReportsForBounds(north, south, east, west),
-      400
-    );
+    // Use getVisibleBounds for accurate report-fetch bounding box.
+    try {
+      const bounds = await mapRef.current?.getVisibleBounds();
+      if (bounds) {
+        const [[maxLng, maxLat], [minLng, minLat]] = bounds;
+        lastBoundsRef.current = { north: maxLat, south: minLat, east: maxLng, west: minLng };
+        if (reportFetchTimer.current) clearTimeout(reportFetchTimer.current);
+        reportFetchTimer.current = setTimeout(
+          () => fetchReportsForBounds(maxLat, minLat, maxLng, minLng),
+          400
+        );
+      }
+    } catch { /* map not ready */ }
   }, [navigating, fetchReportsForBounds]);
 
   // Toggling the Reports layer on refetches immediately for the current
@@ -678,29 +676,37 @@ export default function MapScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
-      <MapView
+      <MapboxMapView
         ref={mapRef}
         style={{ flex: 1 }}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={DEFAULT_REGION}
-        mapType={!isOnline && offlinePack ? "none" : "standard"}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        showsBuildings={!isOnline && !!offlinePack ? false : true}
-        onRegionChange={handleRegionChange}
-        onRegionChangeComplete={onRegionChangeComplete}
+        styleURL={dark
+          ? "mapbox://styles/mapbox/dark-v11"
+          : (process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL ?? "mapbox://styles/mapbox/streets-v12")}
+        logoEnabled={false}
+        compassEnabled={false}
+        attributionEnabled={false}
+        onRegionIsChanging={handleRegionChange}
+        onRegionDidChange={onRegionChangeComplete}
         onLongPress={handleLongPress}
-        customMapStyle={dark ? mapStyleDark : mapStyle}
       >
-        {/* Offline: render downloaded Mapbox tiles (light or dark to match the
-            app theme).  mapType="none" on the MapView removes the Google base
-            layer entirely so there is no conflict between the two providers. */}
+        <MapboxCamera
+          ref={cameraRef}
+          defaultSettings={{
+            centerCoordinate: [DEFAULT_REGION.longitude, DEFAULT_REGION.latitude],
+            zoomLevel: 13,
+          }}
+        />
+
+        {/* Offline: render downloaded Mapbox raster tiles from the local filesystem.
+            RasterSource accepts the same file:// URL template as the old UrlTile. */}
         {!isOnline && offlinePack && (
-          <UrlTile
-            urlTemplate={`file://${dark ? TILE_PATH_TEMPLATE_DARK : TILE_PATH_TEMPLATE_LIGHT}`}
+          <RasterSource
+            id="offline-tiles"
+            tileUrlTemplates={[`file://${dark ? TILE_PATH_TEMPLATE_DARK : TILE_PATH_TEMPLATE_LIGHT}`]}
             tileSize={256}
-          />
+          >
+            <RasterLayer id="offline-raster" style={{}} />
+          </RasterSource>
         )}
 
         <RouteOverlay
@@ -719,13 +725,13 @@ export default function MapScreen() {
         />
 
         {longPressCoord && !activeJourney && (
-          <Marker
-            coordinate={longPressCoord}
-            tracksViewChanges={false}
+          <PointAnnotation
+            id="dropped-pin"
+            coordinate={[longPressCoord.longitude, longPressCoord.latitude]}
             anchor={{ x: 0.5, y: 1.0 }}
           >
             <DestinationPin name={longPressName} />
-          </Marker>
+          </PointAnnotation>
         )}
 
         {!activeJourney && (
@@ -737,7 +743,7 @@ export default function MapScreen() {
             onPress={handleSelectStop}
           />
         )}
-      </MapView>
+      </MapboxMapView>
 
       {/* Report pins overlay — a plain RN layer above the map (NOT map markers),
           so Android PROVIDER_GOOGLE can never drop them on zoom/tile reloads.

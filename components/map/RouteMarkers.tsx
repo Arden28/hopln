@@ -1,8 +1,8 @@
 import type { NodeMarker } from "@/components/map/types";
 import { Animated, Image, StyleSheet, View } from "react-native";
 import { Text } from "react-native";
-import { Marker } from "react-native-maps";
-import { useEffect, useRef, useState } from "react";
+import Mapbox from "@rnmapbox/maps";
+import { useEffect, useRef } from "react";
 
 const ORANGE = "#FF6F00";
 
@@ -56,14 +56,7 @@ export function StopNodeMarker({ color, onLoad }: { color: string; onLoad: () =>
 }
 
 export function TrackedNodeMarker({ m, isBoardingStop }: { m: NodeMarker; isBoardingStop?: boolean }) {
-  const [tracking, setTracking] = useState(true);
   const pulseScale = useRef(new Animated.Value(1)).current;
-
-  // Keep tracksViewChanges=true while the pulse animation is running so the
-  // native map layer re-reads the view on every frame.
-  useEffect(() => {
-    if (isBoardingStop) setTracking(true);
-  }, [isBoardingStop]);
 
   useEffect(() => {
     if (!isBoardingStop) { pulseScale.setValue(1); return; }
@@ -78,9 +71,9 @@ export function TrackedNodeMarker({ m, isBoardingStop }: { m: NodeMarker; isBoar
   const pulseOpacity = pulseScale.interpolate({ inputRange: [1, 2.2], outputRange: [0.55, 0] });
 
   return (
-    <Marker
-      coordinate={m.coord}
-      tracksViewChanges={tracking}
+    <Mapbox.PointAnnotation
+      id={m.id}
+      coordinate={[m.coord.longitude, m.coord.latitude]}
       anchor={{ x: 0.5, y: 0.5 }}
     >
       <View style={{ alignItems: "center", justifyContent: "center" }}>
@@ -90,9 +83,9 @@ export function TrackedNodeMarker({ m, isBoardingStop }: { m: NodeMarker; isBoar
             { borderColor: m.color, transform: [{ scale: pulseScale }], opacity: pulseOpacity },
           ]} />
         )}
-        <StopNodeMarker color={m.color} onLoad={() => { if (!isBoardingStop) setTracking(false); }} />
+        <StopNodeMarker color={m.color} onLoad={() => {}} />
       </View>
-    </Marker>
+    </Mapbox.PointAnnotation>
   );
 }
 

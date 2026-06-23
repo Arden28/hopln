@@ -12,6 +12,9 @@ import { requestNotificationPermission, registerPushToken, syncTokenWithBackend,
 import { useNotificationStore } from "@/store/notificationStore";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/services/apiClient";
+import Mapbox from "@rnmapbox/maps";
+
+Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "");
 
 // Register background location task at module-eval time, before any component mounts.
 registerLocationTask();

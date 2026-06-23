@@ -27,7 +27,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import MapView, { PROVIDER_GOOGLE, Region } from "react-native-maps";
+import { MapView as MapboxMapView, Camera as MapboxCamera } from "@rnmapbox/maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ORANGE = "#FF6F00";
@@ -74,15 +74,16 @@ function LocationPickerModal({
   initialLat?: number;
   initialLng?: number;
 }) {
-  const insets    = useSafeAreaInsets();
-  const mapRef    = useRef<MapView>(null);
-  const centerRef = useRef({ lat: initialLat, lng: initialLng });
+  const insets      = useSafeAreaInsets();
+  const cameraRef   = useRef<MapboxCamera>(null);
+  const centerRef   = useRef({ lat: initialLat, lng: initialLng });
   const [displayCoords, setDisplayCoords] = useState({ lat: initialLat, lng: initialLng });
   const [gpsLoading, setGpsLoading]       = useState(false);
 
-  const onRegionChangeComplete = (r: Region) => {
-    centerRef.current = { lat: r.latitude, lng: r.longitude };
-    setDisplayCoords({ lat: r.latitude, lng: r.longitude });
+  const onRegionDidChange = (feature: any) => {
+    const [lng, lat] = feature?.geometry?.coordinates ?? [initialLng, initialLat];
+    centerRef.current = { lat, lng };
+    setDisplayCoords({ lat, lng });
   };
 
   const handleMyLocation = async () => {
@@ -92,7 +93,11 @@ function LocationPickerModal({
       if (status !== "granted") { Alert.alert("Permission needed", "Enable location in Settings."); return; }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const { latitude, longitude } = pos.coords;
-      mapRef.current?.animateToRegion({ latitude, longitude, latitudeDelta: 0.005, longitudeDelta: 0.005 }, 500);
+      cameraRef.current?.setCamera({
+        centerCoordinate: [longitude, latitude],
+        zoomLevel: 16,
+        animationDuration: 500,
+      });
       centerRef.current = { lat: latitude, lng: longitude };
       setDisplayCoords({ lat: latitude, lng: longitude });
     } catch { Alert.alert("Error", "Could not get your location."); }
@@ -102,15 +107,21 @@ function LocationPickerModal({
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1 }}>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
+        <MapboxMapView
           style={StyleSheet.absoluteFill}
-          initialRegion={{ latitude: initialLat, longitude: initialLng, latitudeDelta: 0.01, longitudeDelta: 0.01 }}
-          onRegionChangeComplete={onRegionChangeComplete}
-          showsUserLocation
-          showsMyLocationButton={false}
-        />
+          styleURL={process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL ?? "mapbox://styles/mapbox/streets-v12"}
+          logoEnabled={false}
+          attributionEnabled={false}
+          onRegionDidChange={onRegionDidChange}
+        >
+          <MapboxCamera
+            ref={cameraRef}
+            defaultSettings={{
+              centerCoordinate: [initialLng, initialLat],
+              zoomLevel: 15,
+            }}
+          />
+        </MapboxMapView>
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, lpm.pinContainer]}>
           <Ionicons name="location" size={44} color={ORANGE} style={{ marginBottom: -4 }} />
           <View style={lpm.pinShadow} />
