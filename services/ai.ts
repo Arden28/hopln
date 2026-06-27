@@ -104,8 +104,10 @@ export const AiService = {
         timeout: 90000,
       });
       return response.data;
-
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.status === 503) {
+        throw new Error(error.message ?? "Route planning is temporarily unavailable. Please try again in a moment.");
+      }
       console.error("AI Routing Network Error:", error);
       throw error;
     }

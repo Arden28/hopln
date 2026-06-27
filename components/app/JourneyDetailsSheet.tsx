@@ -1,5 +1,6 @@
 // components/app/JourneyDetailsSheet.tsx
 import { formatDist, usePrefsStore } from "@/store/prefsStore";
+import { extractFares } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Linking, Platform } from "react-native";
@@ -183,6 +184,7 @@ export default function JourneyDetailsSheet({
   if (!activeJourney) return null;
 
   const segs = activeJourney.route?.segments ?? [];
+  const fare = prefs.showFares ? extractFares(segs) : null;
 
   const handleShare = async () => {
     const from = activeJourney.fromLoc;
@@ -253,6 +255,45 @@ export default function JourneyDetailsSheet({
         {!routeLoading && segs.length > 0 && (
           <View style={s.chipsRow}>
             <RouteChips segments={segs} dark={dark} units={prefs.units} />
+          </View>
+        )}
+
+        {prefs.showFares && (
+          <View style={[s.fareRow, { borderTopColor: C.border }]}>
+            <Ionicons name="receipt-outline" size={13} color={fare?.found ? ORANGE : GREY} />
+            <View style={{ flex: 1 }}>
+              {fare?.found ? (
+                <>
+                  <Text style={[s.fareTotal, { color: C.text }]}>
+                    {fare.confidence === "zone" ? "Est. fare " : "Fare "}
+                    <Text style={{ fontWeight: "700" }}>
+                      {fare.confidence === "zone" ? "~" : ""}{fare.currency} {fare.total}
+                    </Text>
+                  </Text>
+                  {fare.breakdown.length > 1 && (
+                    <Text style={[s.fareBreakdown, { color: GREY }]}>
+                      {fare.breakdown.map((b) => `${b.routeName} ${fare.currency} ${b.amount}`).join("  +  ")}
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <Text style={[s.fareTotal, { color: GREY }]}>No fare info for this route</Text>
+              )}
+            </View>
+            {fare?.found && fare.confidence === "zone" && (
+              <Pressable
+                hitSlop={12}
+                onPress={() =>
+                  Alert.alert(
+                    "About fare estimates",
+                    "This is based on typical zone pricing for these areas. Actual fares depend on the route, time of day, and conductor — board with exact change when possible.",
+                    [{ text: "Got it" }],
+                  )
+                }
+              >
+                <Ionicons name="information-circle-outline" size={16} color={GREY} />
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -436,6 +477,17 @@ const s = StyleSheet.create({
     borderWidth:    1.5,
   },
   saveBtnText: { color: ORANGE, fontSize: 16, fontWeight: "600" },
+
+  fareRow: {
+    flexDirection:    "row",
+    alignItems:       "center",
+    gap:              10,
+    paddingHorizontal: 20,
+    paddingVertical:  10,
+    borderTopWidth:   StyleSheet.hairlineWidth,
+  },
+  fareTotal:     { fontSize: 13, color: GREY },
+  fareBreakdown: { fontSize: 11, marginTop: 1 },
 
   mapsLink: {
     flexDirection:    "row",

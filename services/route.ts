@@ -14,6 +14,12 @@ export interface RouteStop {
   lng:  number;
 }
 
+export interface SegmentFare {
+  amount:     number;
+  currency:   string;
+  confidence: "exact" | "zone";
+}
+
 export interface RouteSegment {
   mode: "WALK" | "BUS" | "TRAM" | "SUBWAY" | "RAIL" | "FERRY";
   duration: number;
@@ -29,6 +35,8 @@ export interface RouteSegment {
   stops?: RouteStop[];
   from: { name: string; lat: number; lng: number };
   to: { name: string; lat: number; lng: number };
+  /** Server-resolved fare for this transit leg. null = no fare data in DB for this route. */
+  fare?: SegmentFare | null;
 }
 
 export interface Route {
@@ -93,11 +101,17 @@ export const RouteService = {
     };
     if (maxWalkMeters !== undefined) payload.max_walk_distance = maxWalkMeters;
 
-    const data = await fetchApi<{ data: Route[] }>("/journey/calculate", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-
-    return data.data ?? [];
+    try {
+      const data = await fetchApi<{ data: Route[] }>("/journey/calculate", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return data.data ?? [];
+    } catch (error: any) {
+      if (error?.status === 503) {
+        throw new Error(error.message ?? "Route planning is temporarily unavailable. Please try again in a moment.");
+      }
+      throw error;
+    }
   },
 };

@@ -1,5 +1,6 @@
 // utils/mapHelpers.ts
 import { Ionicons } from "@expo/vector-icons";
+import type { RouteSegment } from "@/services/route";
 
 export type Coords = {
   latitude: number;
@@ -174,6 +175,39 @@ export function getRouteColor(routeName: string): string {
     return Math.round(255 * color).toString(16).padStart(2, '0');
   };
   return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
+}
+
+export type FareResult =
+  | {
+      found:      true;
+      total:      number;
+      currency:   string;
+      confidence: "exact" | "zone";
+      breakdown:  { routeName: string; amount: number }[];
+    }
+  | { found: false };
+
+/**
+ * Extracts server-resolved fare data from journey segments.
+ * Returns found:false when no transit segments have DB-backed fare data,
+ * which the UI should display as "No fare info for this route".
+ */
+export function extractFares(segments: RouteSegment[]): FareResult {
+  const transit = segments.filter((s) => s.mode !== "WALK");
+  if (transit.length === 0) return { found: false };
+  if (transit.every((s) => !s.fare)) return { found: false };
+
+  const breakdown = transit
+    .filter((s) => s.fare != null)
+    .map((s) => ({ routeName: s.route_name ?? "Bus", amount: s.fare!.amount }));
+
+  const total    = breakdown.reduce((acc, b) => acc + b.amount, 0);
+  const currency = transit.find((s) => s.fare)?.fare?.currency ?? "KES";
+  const confidence: "exact" | "zone" = transit.some((s) => s.fare?.confidence === "zone")
+    ? "zone"
+    : "exact";
+
+  return { found: true, total, currency, confidence, breakdown };
 }
 
 export function getReportIcon(type: string) {

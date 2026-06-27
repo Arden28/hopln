@@ -1,8 +1,12 @@
+import React, { useEffect, useRef, useState } from "react";
 import type { NodeMarker } from "@/components/map/types";
 import { Animated, Image, StyleSheet, View } from "react-native";
 import { Text } from "react-native";
-import Mapbox from "@rnmapbox/maps";
-import { useEffect, useRef } from "react";
+import { PointAnnotation } from "@rnmapbox/maps";
+
+// Named import mirrors the pattern used in StopsLayer/RouteOverlay — avoids the
+// web .d.ts resolution issue that can leave namespace-accessed components undefined.
+const NativePointAnnotation = PointAnnotation as unknown as React.ComponentType<any>;
 
 const ORANGE = "#FF6F00";
 
@@ -57,6 +61,15 @@ export function StopNodeMarker({ color, onLoad }: { color: string; onLoad: () =>
 
 export function TrackedNodeMarker({ m, isBoardingStop }: { m: NodeMarker; isBoardingStop?: boolean }) {
   const pulseScale = useRef(new Animated.Value(1)).current;
+  // Mount-gate: hold off rendering the PointAnnotation until layout is complete.
+  // matatu.png is a local bundle asset and loads in < 50 ms; 100 ms is ample.
+  // Keeping id/key stable after mount avoids the "max 1 subview" race.
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 100);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     if (!isBoardingStop) { pulseScale.setValue(1); return; }
@@ -70,9 +83,11 @@ export function TrackedNodeMarker({ m, isBoardingStop }: { m: NodeMarker; isBoar
 
   const pulseOpacity = pulseScale.interpolate({ inputRange: [1, 2.2], outputRange: [0.55, 0] });
 
+  if (!ready) return null;
   return (
-    <Mapbox.PointAnnotation
+    <NativePointAnnotation
       id={m.id}
+      key={m.id}
       coordinate={[m.coord.longitude, m.coord.latitude]}
       anchor={{ x: 0.5, y: 0.5 }}
     >
@@ -85,7 +100,7 @@ export function TrackedNodeMarker({ m, isBoardingStop }: { m: NodeMarker; isBoar
         )}
         <StopNodeMarker color={m.color} onLoad={() => {}} />
       </View>
-    </Mapbox.PointAnnotation>
+    </NativePointAnnotation>
   );
 }
 
@@ -106,7 +121,7 @@ export function SquarePin({ isStart }: { isStart: boolean }) {
 
 export function DestinationPin({ name }: { name: string }) {
   return (
-    <View style={{ alignItems: "center" }}>
+    <View style={{ alignItems: "center", height: 52 }}>
       <View style={{
         backgroundColor: "#1C1C1E",
         paddingHorizontal: 10,

@@ -9,6 +9,7 @@ export interface TravelPrefs {
   units:         "km" | "mi";
   navView:       "flat" | "tilted";
   maxWalkMeters: 500 | 1000 | 1500 | 2000;
+  showFares:     boolean;
 }
 
 const DEFAULTS: TravelPrefs = {
@@ -17,6 +18,7 @@ const DEFAULTS: TravelPrefs = {
   units:         "km",
   navView:       "tilted",
   maxWalkMeters: 1500,
+  showFares:     true,
 };
 
 interface PrefsStore {

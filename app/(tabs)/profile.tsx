@@ -72,13 +72,6 @@ function makeC(dark: boolean) {
   };
 }
 
-const MAP_APP_LABEL: Record<string, string> = {
-  system: "System default",
-  google: "Google Maps",
-  apple:  "Apple Maps",
-  waze:   "Waze",
-};
-
 const NAV_HINT_LABEL: Record<string, string> = {
   off:      "Off",
   concise:  "Concise",
@@ -167,17 +160,6 @@ export default function Profile() {
       <View style={[s.section, { backgroundColor: C.card }]}>
         <Text style={[s.sectionTitle, { color: C.subText }]}>TRAVEL PREFERENCES</Text>
         <Row
-          C={C} icon="navigate-outline" label="Preferred map app"
-          value={MAP_APP_LABEL[prefs.mapApp]}
-          onPress={() => pickPref("mapApp", "Preferred map app", [
-            { label: "System default", value: "system" },
-            { label: "Google Maps",    value: "google" },
-            { label: "Apple Maps",     value: "apple"  },
-            { label: "Waze",           value: "waze"   },
-          ])}
-        />
-        <View style={[s.sep, { backgroundColor: C.hairline }]} />
-        <Row
           C={C} icon="walk-outline" label="Navigation hints"
           value={NAV_HINT_LABEL[prefs.navHints]}
           onPress={() => pickPref("navHints", "Navigation hints", [
@@ -214,6 +196,25 @@ export default function Profile() {
             { label: "1.5 km", value: 1500 },
             { label: "2 km",   value: 2000 },
           ])}
+        />
+        <View style={[s.sep, { backgroundColor: C.hairline }]} />
+        <Row
+          C={C} icon="receipt-outline" label="Fare estimates"
+          value={prefs.showFares ? "On" : "Off"}
+          onPress={() => {
+            if (prefs.showFares) {
+              setPref("showFares", false);
+            } else {
+              Alert.alert(
+                "Fare estimates",
+                "These estimates are based on typical Nairobi distance pricing and are highly approximate. Actual fares on the ground can vary significantly by time of day, traffic, and conductor. We're actively working on making them more accurate.",
+                [
+                  { text: "Show anyway", onPress: () => setPref("showFares", true) },
+                  { text: "Cancel", style: "cancel" },
+                ],
+              );
+            }
+          }}
         />
         <View style={[s.sep, { backgroundColor: C.hairline }]} />
         <Row

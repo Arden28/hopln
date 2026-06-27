@@ -68,8 +68,8 @@ export async function scheduleAlightWarning(minutesAway: number, stopName: strin
 export async function scheduleArrivalNotification(stopName: string): Promise<string> {
   return Notifications.scheduleNotificationAsync({
     content: {
-      title: "You've arrived!",
-      body: `Welcome to ${stopName}`,
+      title: "You've arrived",
+      body: `You've reached ${stopName}`,
       sound: "default",
       data: { type: "arrival" },
     },

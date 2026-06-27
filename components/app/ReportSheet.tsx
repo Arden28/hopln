@@ -1,11 +1,14 @@
 import { ReportCategory, ReportService } from "@/services/report";
+import { useAuthStore } from "@/store/authStore";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
+  Modal,
   PanResponder,
   Pressable,
   ScrollView,
@@ -52,10 +55,13 @@ interface Props {
 export default function ReportSheet({ onClose, userLat, userLng }: Props) {
   const insets = useSafeAreaInsets();
   const dark = useColorScheme() === "dark";
+  const router = useRouter();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   const [selectedCat, setSelectedCat] = useState<ReportCategory | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [showAuthWall, setShowAuthWall] = useState(false);
 
   const sheetY    = useRef(new Animated.Value(SHEET_H)).current;
   const backdropA = useRef(new Animated.Value(0)).current;
@@ -97,6 +103,7 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
   // ── Submit ──────────────────────────────────────────────────────────────────
   const submit = async () => {
     if (!selectedCat) return;
+    if (!isAuthenticated) { setShowAuthWall(true); return; }
     if (!userLat || !userLng) {
       Alert.alert("Location needed", "We need your current position to pin a report.");
       return;
@@ -236,6 +243,41 @@ export default function ReportSheet({ onClose, userLat, userLng }: Props) {
           </View>
         )}
       </Animated.View>
+
+      {/* ── Auth wall ────────────────────────────────────────────────────────── */}
+      {showAuthWall && (
+        <Modal visible transparent animationType="none" onRequestClose={() => setShowAuthWall(false)}>
+          <Pressable style={s.wallBackdrop} onPress={() => setShowAuthWall(false)} />
+          <View style={[s.wallSheet, { backgroundColor: bg }]}>
+            <View style={s.pillWrap}>
+              <View style={[s.pill, { backgroundColor: pill }]} />
+            </View>
+            <View style={[s.wallIconWrap, { backgroundColor: "#FF6F0018" }]}>
+              <Ionicons name="lock-closed" size={28} color="#FF6F00" />
+            </View>
+            <Text style={[s.wallTitle, { color: txt }]}>Sign in to report</Text>
+            <Text style={[s.wallSub, { color: muted }]}>
+              Help Nairobi commuters stay informed. Sign in to pin a live alert on the map.
+            </Text>
+            <Pressable
+              onPress={() => { setShowAuthWall(false); dismiss(); router.push("/(auth)/login" as any); }}
+              style={s.wallPrimaryBtn}
+            >
+              <Text style={s.wallPrimaryTxt}>Sign In</Text>
+              <Ionicons name="arrow-forward" size={15} color="#fff" />
+            </Pressable>
+            <Pressable
+              onPress={() => { setShowAuthWall(false); dismiss(); router.push("/(auth)/register" as any); }}
+              style={[s.wallSecondaryBtn, { borderColor: dark ? "#48484A" : "#D1D1D6" }]}
+            >
+              <Text style={[s.wallSecondaryTxt, { color: txt }]}>Create Account</Text>
+            </Pressable>
+            <Pressable onPress={() => setShowAuthWall(false)} hitSlop={10}>
+              <Text style={[s.wallNotNow, { color: muted }]}>Not now</Text>
+            </Pressable>
+          </View>
+        </Modal>
+      )}
     </>
   );
 }
@@ -394,4 +436,38 @@ const s = StyleSheet.create({
   },
   stateHeading: { fontSize: 20, fontWeight: "700" },
   stateNote:    { fontSize: 13, textAlign: "center", lineHeight: 19 },
+
+  // ── Auth wall ──────────────────────────────────────────────────────────────
+  wallBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.52)",
+  },
+  wallSheet: {
+    position: "absolute",
+    bottom: 0, left: 0, right: 0,
+    borderTopLeftRadius:  28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 26,
+    paddingTop: 14,
+    paddingBottom: 36,
+    alignItems: "center",
+    gap: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 40,
+  },
+  wallIconWrap: {
+    width: 66, height: 66, borderRadius: 21,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: 2,
+  },
+  wallTitle:        { fontSize: 21, fontWeight: "800", letterSpacing: -0.4, textAlign: "center" },
+  wallSub:          { fontSize: 13.5, lineHeight: 20, textAlign: "center", marginBottom: 6, paddingHorizontal: 4 },
+  wallPrimaryBtn:   { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, borderRadius: 16, backgroundColor: "#FF6F00" },
+  wallPrimaryTxt:   { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
+  wallSecondaryBtn: { width: "100%", alignItems: "center", paddingVertical: 14, borderRadius: 16, borderWidth: 1.5 },
+  wallSecondaryTxt: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
+  wallNotNow:       { fontSize: 13, fontWeight: "500", marginTop: 2 },
 });

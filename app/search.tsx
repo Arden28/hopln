@@ -5,7 +5,7 @@ import { RouteService, type Route } from "@/services/route";
 import { useSavedStore } from "@/store/savedStore";
 import { usePrefsStore } from "@/store/prefsStore";
 import { UnifiedLocation, useJourneyStore } from "@/store/journeyStore";
-import { getRouteColor } from "@/utils/mapHelpers";
+import { getRouteColor, extractFares } from "@/utils/mapHelpers";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -634,7 +634,7 @@ export default function SearchScreen() {
           <FlatList
             data={availableRoutes}
             keyExtractor={(_, i) => `route-${i}`}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 8 }}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 8, gap: 10 }}
             renderItem={({ item: route }) => {
               const transitSegs = (route.segments || []).filter(
                 (seg) => seg.mode === "BUS" || seg.mode === "TRAM"
@@ -656,56 +656,63 @@ export default function SearchScreen() {
               const walkKm = route.total_walk_distance
                 ? (route.total_walk_distance / 1000).toFixed(1)
                 : null;
+              const fare = prefs.showFares
+                ? extractFares(route.segments ?? [])
+                : null;
 
               return (
                 <Pressable
                   onPress={() => onSelectRoute(route)}
-                  style={({ pressed }) => [s.routeCard2, { borderBottomColor: C.hairline, backgroundColor: pressed ? C.pressed : "transparent" }]}
+                  style={({ pressed }) => [
+                    s.routeCard2,
+                    { borderColor: C.hairline, backgroundColor: pressed ? C.pressed : C.card },
+                  ]}
                 >
-                  {/* Header: icon + title + duration badge + chevron */}
-                  <View style={s.routeCard2Header}>
+                  <View style={s.routeCard2Row}>
                     <View style={[s.iconWrap, { backgroundColor: iconBg }]}>
                       <Ionicons name={iconName} size={18} color="#FFF" />
                     </View>
-                    <Text style={[s.rowTitle, { color: C.text, fontWeight: "700", flex: 1 }]} numberOfLines={1}>
-                      {title}
-                    </Text>
-                    <View style={[s.durationBadge, { backgroundColor: ORANGE + "18" }]}>
-                      <Ionicons name="time-outline" size={11} color={ORANGE} />
-                      <Text style={[s.durationBadgeText, { color: ORANGE }]}>{durationMins} min</Text>
+
+                    <View style={s.routeCard2Body}>
+                      <Text style={[s.routeCard2Title, { color: C.text }]} numberOfLines={1}>
+                        {title}
+                      </Text>
+                      <View style={s.routeMeta}>
+                        {route.type === "transfer" ? (
+                          <View style={[s.metaBadge, { backgroundColor: BLUE + "15" }]}>
+                            <Ionicons name="git-network-outline" size={11} color={BLUE} />
+                            <Text style={[s.metaBadgeText, { color: BLUE }]}>Transfer</Text>
+                          </View>
+                        ) : hasTransit ? (
+                          <View style={[s.metaBadge, { backgroundColor: "#30D15815" }]}>
+                            <Ionicons name="checkmark-circle-outline" size={11} color="#30D158" />
+                            <Text style={[s.metaBadgeText, { color: "#30D158" }]}>Direct</Text>
+                          </View>
+                        ) : null}
+                        {walkKm && (
+                          <View style={[s.metaBadge, { backgroundColor: C.iconBg }]}>
+                            <Ionicons name="walk-outline" size={11} color={C.sub} />
+                            <Text style={[s.metaBadgeText, { color: C.sub }]}>{walkKm} km walk</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
-                    <Ionicons name="chevron-forward" size={16} color={C.sub} style={{ marginLeft: 4 }} />
-                  </View>
 
-                  {/* Meta badges */}
-                  <View style={s.routeMeta}>
-                    {route.type === "transfer" ? (
-                      <View style={[s.metaBadge, { backgroundColor: BLUE + "15" }]}>
-                        <Ionicons name="git-network-outline" size={11} color={BLUE} />
-                        <Text style={[s.metaBadgeText, { color: BLUE }]}>Transfer</Text>
-                      </View>
-                    ) : hasTransit ? (
-                      <View style={[s.metaBadge, { backgroundColor: "#30D15815" }]}>
-                        <Ionicons name="checkmark-circle-outline" size={11} color="#30D158" />
-                        <Text style={[s.metaBadgeText, { color: "#30D158" }]}>Direct</Text>
-                      </View>
-                    ) : null}
-                    {walkKm && (
-                      <View style={[s.metaBadge, { backgroundColor: C.iconBg }]}>
-                        <Ionicons name="walk-outline" size={11} color={C.sub} />
-                        <Text style={[s.metaBadgeText, { color: C.sub }]}>{walkKm} km walk</Text>
-                      </View>
-                    )}
-                    {route.total_distance > 0 && (
-                      <View style={[s.metaBadge, { backgroundColor: C.iconBg }]}>
-                        <Ionicons name="navigate-outline" size={11} color={C.sub} />
-                        <Text style={[s.metaBadgeText, { color: C.sub }]}>
-                          {(route.total_distance / 1000).toFixed(1)} km total
-                        </Text>
-                      </View>
-                    )}
-                  </View>
+                    <View style={s.routeCard2Right}>
+                      {fare?.found ? (
+                        <>
+                          <Text style={[s.routeCard2FareAmt, { color: C.text }]}>
+                            {fare.confidence === "zone" ? "~" : ""}{fare.currency} {fare.total}
+                          </Text>
+                          <Text style={[s.routeCard2Mins, { color: C.sub }]}>{durationMins} min</Text>
+                        </>
+                      ) : (
+                        <Text style={[s.routeCard2FareAmt, { color: C.text }]}>{durationMins} min</Text>
+                      )}
+                    </View>
 
+                    <Ionicons name="chevron-forward" size={15} color={C.sub} />
+                  </View>
                 </Pressable>
               );
             }}
@@ -867,35 +874,38 @@ const s = StyleSheet.create({
   sheetEmptySub:   { fontSize: 14, textAlign: "center" },
 
   routeCard2: {
-    paddingVertical:   16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    borderWidth:   1,
+    padding:      14,
   },
-  routeCard2Header: {
-    flexDirection: "row",
+  routeCard2Row: {
+    flexDirection: "row" as const,
     alignItems:    "center",
-    gap:           10,
-    marginBottom:  12,
+    gap:            12,
   },
-  durationBadge: {
-    flexDirection: "row",
-    alignItems:    "center",
-    gap:           4,
-    paddingHorizontal: 8,
-    paddingVertical:   4,
-    borderRadius:  20,
+  routeCard2Body: {
+    flex: 1,
+    gap:   6,
   },
-  durationBadgeText: { fontSize: 12, fontWeight: "700" as const },
-  routeMeta:   { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6, marginBottom: 12 },
-  metaBadge:   { flexDirection: "row" as const, alignItems: "center" as const, gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
+  routeCard2Title: {
+    fontSize:      16,
+    fontWeight:    "700" as const,
+    letterSpacing: -0.2,
+  },
+  routeCard2Right: {
+    alignItems: "flex-end" as const,
+    gap:         2,
+  },
+  routeCard2FareAmt: {
+    fontSize:      17,
+    fontWeight:    "700" as const,
+    letterSpacing: -0.3,
+  },
+  routeCard2Mins: {
+    fontSize:   12,
+    fontWeight: "500" as const,
+  },
+  routeMeta:    { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 },
+  metaBadge:    { flexDirection: "row" as const, alignItems: "center" as const, gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
   metaBadgeText: { fontSize: 11, fontWeight: "600" as const },
-  selectRouteBtn: {
-    flexDirection:  "row" as const,
-    alignItems:     "center" as const,
-    justifyContent: "center" as const,
-    gap:            8,
-    backgroundColor: ORANGE,
-    borderRadius:   12,
-    height:         44,
-  },
-  selectRouteBtnText: { fontSize: 14, fontWeight: "700" as const, color: "#FFF" },
 });

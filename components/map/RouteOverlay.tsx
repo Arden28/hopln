@@ -1,7 +1,40 @@
-import React from "react";
-import Mapbox from "@rnmapbox/maps";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ShapeSource, LineLayer, PointAnnotation, CircleLayer } from "@rnmapbox/maps";
 import type { IntermediateStop, LocMarker, NodeMarker, TransitLeg, WalkLeg } from "@/components/map/types";
-import { DestinationPin, IntermediateStopDot, SquarePin, TrackedNodeMarker } from "@/components/map/RouteMarkers";
+import { DestinationPin, SquarePin, TrackedNodeMarker } from "@/components/map/RouteMarkers";
+
+// Named imports (same pattern as StopsLayer) are used intentionally — the web .d.ts
+// resolution that the IDE picks up may not expose all components on the default Mapbox
+// namespace object, causing undefined at runtime. Named imports guarantee correct
+// Metro resolution to the native module.
+const NativeShapeSource     = ShapeSource     as unknown as React.ComponentType<any>;
+const NativeLineLayer       = LineLayer       as unknown as React.ComponentType<any>;
+const NativeCircleLayer     = CircleLayer     as unknown as React.ComponentType<any>;
+const NativePointAnnotation = PointAnnotation as unknown as React.ComponentType<any>;
+
+// Mount-gate: hold off rendering the PointAnnotation until 100 ms after the
+// component mounts so the React Native layout pass has fully measured all
+// sub-views before Mapbox rasterizes them. Keeping id/key stable after the
+// initial mount avoids the "PointAnnotation supports max 1 subview" race that
+// the previous key-flip approach could trigger.
+function LocMarkerPin({ m }: { m: LocMarker }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 100);
+    return () => clearTimeout(t);
+  }, []);
+  if (!ready) return null;
+  return (
+    <NativePointAnnotation
+      key={m.id}
+      id={m.id}
+      coordinate={[m.coord.longitude, m.coord.latitude]}
+      anchor={m.isStart ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 0.8 }}
+    >
+      {m.isStart ? <SquarePin isStart /> : <DestinationPin name={m.name} />}
+    </NativePointAnnotation>
+  );
+}
 
 function hexWithAlpha(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -51,16 +84,30 @@ interface RouteOverlayProps {
   currentWalkLegIdx?: number;
   userLat?:           number;
   userLng?:           number;
-  viewZoom?:          number;
 }
 
 function _RouteOverlay({
   walkLegs, transitLegs, nodeMarkers, locMarkers, intermediateStops, onIntermStopPress,
-  boardingNodeId, currentStepIndex, currentWalkLegIdx = -1, userLat, userLng, viewZoom,
+  boardingNodeId, currentStepIndex, currentWalkLegIdx = -1, userLat, userLng,
 }: RouteOverlayProps) {
+  const intermGeoJson = useMemo<GeoJSON.FeatureCollection>(() => ({
+    type: "FeatureCollection",
+    features: intermediateStops.map((s) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [s.coord.longitude, s.coord.latitude] },
+      properties: { id: s.id, color: s.color },
+    })),
+  }), [intermediateStops]);
+
+  const handleIntermPress = useCallback((e: any) => {
+    const feature = e.features?.[0];
+    if (!feature) return;
+    const stop = intermediateStops.find((s) => s.id === feature.properties?.id);
+    if (stop) onIntermStopPress(stop);
+  }, [intermediateStops, onIntermStopPress]);
+
   return (
     <>
-      {/* Walking route legs — dashed grey */}
       {walkLegs.map((leg, i) => {
         const isActive = currentWalkLegIdx >= 0 && i === currentWalkLegIdx;
         const isPast   = currentWalkLegIdx >= 0 && i  < currentWalkLegIdx;
@@ -81,22 +128,22 @@ function _RouteOverlay({
         };
 
         return (
-          <Mapbox.ShapeSource key={leg.id} id={`walk-src-${leg.id}`} shape={geojson}>
-            <Mapbox.LineLayer
+          <NativeShapeSource key={leg.id} id={`walk-src-${leg.id}`} shape={geojson}>
+            <NativeLineLayer
               id={`walk-line-${leg.id}`}
               style={{
-                lineColor:   color,
-                lineWidth:   3,
-                lineDasharray: isPast ? undefined : [6, 5],
-                lineCap:     "round",
-                lineJoin:    "round",
+                lineColor: color,
+                lineWidth: 3,
+                // Avoid passing undefined — omit lineDasharray when leg is past.
+                ...(isPast ? {} : { lineDasharray: [6, 5] }),
+                lineCap:   "round",
+                lineJoin:  "round",
               }}
             />
-          </Mapbox.ShapeSource>
+          </NativeShapeSource>
         );
       })}
 
-      {/* Transit route legs — solid, route-coloured */}
       {transitLegs.map((leg, i) => {
         const traveled = currentStepIndex != null && i < currentStepIndex;
         const color = traveled ? hexWithAlpha(leg.color, 0.28) : leg.color;
@@ -111,8 +158,8 @@ function _RouteOverlay({
         };
 
         return (
-          <Mapbox.ShapeSource key={`${leg.id}-${leg.color}`} id={`transit-src-${leg.id}`} shape={geojson}>
-            <Mapbox.LineLayer
+          <NativeShapeSource key={`${leg.id}-${leg.color}`} id={`transit-src-${leg.id}`} shape={geojson}>
+            <NativeLineLayer
               id={`transit-line-${leg.id}`}
               style={{
                 lineColor:  color,
@@ -121,38 +168,30 @@ function _RouteOverlay({
                 lineJoin:   "round",
               }}
             />
-          </Mapbox.ShapeSource>
+          </NativeShapeSource>
         );
       })}
 
-      {/* Intermediate stop dots — hidden below zoom 14 */}
-      {(viewZoom == null || viewZoom >= 14) && intermediateStops.map((s) => (
-        <Mapbox.PointAnnotation
-          key={s.id}
-          id={s.id}
-          coordinate={[s.coord.longitude, s.coord.latitude]}
-          anchor={{ x: 0.5, y: 0.5 }}
-          onSelected={() => onIntermStopPress(s)}
-        >
-          <IntermediateStopDot color={s.color} />
-        </Mapbox.PointAnnotation>
-      ))}
+      {intermediateStops.length > 0 && (
+        <NativeShapeSource id="interm-stops" shape={intermGeoJson} onPress={handleIntermPress}>
+          <NativeCircleLayer
+            id="interm-stops-dots"
+            style={{
+              circleColor:       ["get", "color"],
+              circleRadius:      6.5,
+              circleStrokeWidth: 2,
+              circleStrokeColor: "#FFFFFF",
+            }}
+          />
+        </NativeShapeSource>
+      )}
 
-      {/* Board/alight node markers */}
       {nodeMarkers.map((m) => (
         <TrackedNodeMarker key={m.id} m={m} isBoardingStop={m.id === boardingNodeId} />
       ))}
 
-      {/* Origin / destination pins */}
       {locMarkers.map((m) => (
-        <Mapbox.PointAnnotation
-          key={m.id}
-          id={m.id}
-          coordinate={[m.coord.longitude, m.coord.latitude]}
-          anchor={m.isStart ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1.0 }}
-        >
-          {m.isStart ? <SquarePin isStart /> : <DestinationPin name={m.name} />}
-        </Mapbox.PointAnnotation>
+        <LocMarkerPin key={m.id} m={m} />
       ))}
     </>
   );
@@ -168,6 +207,5 @@ export const RouteOverlay = React.memo(_RouteOverlay, (prev, next) =>
   prev.currentStepIndex  === next.currentStepIndex  &&
   prev.currentWalkLegIdx === next.currentWalkLegIdx &&
   prev.userLat           === next.userLat           &&
-  prev.userLng           === next.userLng           &&
-  prev.viewZoom          === next.viewZoom
+  prev.userLng           === next.userLng
 );

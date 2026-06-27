@@ -95,19 +95,10 @@ export default function MapFloatingUI({
   const softOrange = dark ? "rgba(255,111,0,0.18)" : "#FFF3E0";
 
   const handleNavBtn = () => {
-    const now = Date.now();
-    if (now - lastTap.current <= 400) {
-      onToggleNav();
-      lastTap.current = 0;
+    if (navigating) {
+      onResetNorth();
     } else {
-      // In nav mode: single-tap cycles the three compass states via handleCompassPress.
-      // In explore mode: single-tap centers the camera on the user.
-      if (navigating) {
-        onResetNorth();
-      } else {
-        onRecenter();
-      }
-      lastTap.current = now;
+      onRecenter();
     }
   };
 
@@ -393,6 +384,7 @@ export default function MapFloatingUI({
           {cameraUnlocked && (
             <View style={s.unlockedDot} />
           )}
+
         </View>
         )}
       </View>

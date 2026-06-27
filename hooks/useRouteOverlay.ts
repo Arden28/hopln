@@ -99,7 +99,8 @@ export function useRouteOverlay(
         if (fromLoc._type !== "stop" && fromLoc.id !== "current_location") {
           newLocMarkers.push({ id: "loc-from", coord: { latitude: fromLoc.lat, longitude: fromLoc.lng }, name: fromLoc.name, isStart: true });
         }
-        if (toLoc._type !== "stop" && toLoc.id !== "current_location") {
+        const isWalkOnly = !segments.some((seg: any) => seg.mode !== "WALK");
+        if ((toLoc._type !== "stop" || isWalkOnly) && toLoc.id !== "current_location") {
           newLocMarkers.push({ id: "loc-to", coord: { latitude: toLoc.lat, longitude: toLoc.lng }, name: toLoc.name, isStart: false });
         }
 
@@ -174,12 +175,12 @@ export function useRouteOverlay(
           },
         });
 
-        const firstSegCoords: LatLng[] = segments[0].coordinates
-          .map(([lat, lng]) => ({ latitude: lat, longitude: lng }))
-          .filter(({ latitude, longitude }) => latitude !== 0 && longitude !== 0 && !isNaN(latitude));
+        const validCoords = allCoords.filter(
+          ({ latitude, longitude }) => latitude !== 0 && longitude !== 0 && !isNaN(latitude)
+        );
 
-        if (firstSegCoords.length > 1) {
-          cameraRef.current.fitCoordinates(firstSegCoords, { top: 140, right: 40, bottom: 320, left: 40 });
+        if (validCoords.length > 1) {
+          cameraRef.current.fitCoordinates(validCoords, { top: 140, right: 40, bottom: 320, left: 40 });
         }
       } catch (err) {
         console.warn("Failed to build journey overlays", err);

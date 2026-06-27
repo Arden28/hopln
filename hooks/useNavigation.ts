@@ -21,9 +21,10 @@ import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 
 // EMA alpha for location smoothing. Transit was 0.12 which caused 60-100 m lag at bus speed
 // (88% weight to old position × 45 m/fix × compounding). 0.40 cuts lag to ~5 m within 5 fixes.
+// 0.60 cuts steady-state lag at 40 km/h from 16.7 m to 7.4 m for more accurate progress tracking.
 const EMA_LOC_WALK    = 0.25;
-const EMA_LOC_TRANSIT = 0.40;
-const EMA_SPD         = 0.35;
+const EMA_LOC_TRANSIT = 0.60;
+const EMA_SPD         = 0.50;
 const EMA_HEAD        = 0.3;
 
 function ema(prev: number, next: number, a: number) {
@@ -200,6 +201,16 @@ export function useNavigation() {
 
     const p = meSmoothRef.current;
     if (!p) {
+      meSmoothRef.current = next;
+      meSnapRef.current   = next;
+      setLocation(next);
+      return;
+    }
+
+    // In exploration mode (no active journey) skip EMA entirely so the heading beam
+    // polygon and the NativeUserLocation dot are both anchored to raw GPS.
+    // EMA is only useful during navigation where smooth route-projection matters.
+    if (!engineRef.current) {
       meSmoothRef.current = next;
       meSnapRef.current   = next;
       setLocation(next);
@@ -465,6 +476,7 @@ export function useNavigation() {
       requestBackgroundPermission().then((granted) => {
         if (mountedRef.current) setBgPermGranted(granted);
       });
+      
 
       // Warm-start: show cached position immediately so the map doesn't spin
       // while waiting for the first watcher event (esp. relevant when stationary).
